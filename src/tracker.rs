@@ -8,8 +8,14 @@ use std::{
     time::Instant,
 };
 
+fn default_uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Session {
+    #[serde(default = "default_uuid")]
+    pub id: String,
     pub name: String,
     pub date: DateTime<Local>,
     pub duration_secs: u64,
@@ -37,6 +43,13 @@ pub struct TimeTrackerState {
     pub current_session_elapsed: u64, // Accumulated seconds
 
     pub new_project_name: String,
+    
+    // Feedback and edit states
+    pub export_message: Option<String>,
+    pub export_message_time: Option<Instant>,
+    pub editing_session_id: Option<(String, String)>, // (proj_id, session_id)
+    pub editing_session_name: String,
+    pub deleting_session_id: Option<(String, String)>, // (proj_id, session_id)
 }
 
 impl TimeTrackerState {
@@ -67,6 +80,11 @@ impl TimeTrackerState {
             current_session_start: None,
             current_session_elapsed: 0,
             new_project_name: String::new(),
+            export_message: None,
+            export_message_time: None,
+            editing_session_id: None,
+            editing_session_name: String::new(),
+            deleting_session_id: None,
         }
     }
 
@@ -119,6 +137,7 @@ impl TimeTrackerState {
             if let Some(proj_id) = &self.active_project_id {
                 if let Some(proj) = self.data.projects.iter_mut().find(|p| &p.id == proj_id) {
                     proj.sessions.push(Session {
+                        id: default_uuid(),
                         name: self.active_session_name.trim().to_string(),
                         date: Local::now(),
                         duration_secs: secs,
@@ -134,7 +153,7 @@ impl TimeTrackerState {
         self.save();
     }
 
-    fn export_project(&self, proj: &Project) {
+    fn export_project(&mut self, proj: &Project) {
         let mut workbook = Workbook::new();
         let sheet = workbook.add_worksheet();
         
@@ -154,17 +173,20 @@ impl TimeTrackerState {
             let _ = sheet.write_number(row, 4, session.duration_secs as f64 / 60.0);
         }
 
-        let desktop_dir = directories::UserDirs::new()
-            .and_then(|dirs| dirs.desktop_dir().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| PathBuf::from("."));
-
-        let file_name = format!("{}_Export_{}.xlsx", proj.name.replace(" ", "_"), Local::now().format("%Y%m%d"));
-        let path = desktop_dir.join(file_name);
+        let default_name = format!("{}_Export_{}.xlsx", proj.name.replace(" ", "_"), Local::now().format("%Y%m%d"));
         
-        if let Err(e) = workbook.save(&path) {
-            eprintln!("Error exportando excel: {}", e);
-        } else {
-            println!("Exportado a {:?}", path);
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Guardar Excel de Proyecto")
+            .add_filter("Excel Document", &["xlsx"])
+            .set_file_name(&default_name)
+            .save_file()
+        {
+            if let Err(e) = workbook.save(&path) {
+                self.export_message = Some(format!("Error: {}", e));
+            } else {
+                self.export_message = Some(format!("Guardado: {:?}", path.file_name().unwrap_or_default()));
+            }
+            self.export_message_time = Some(Instant::now());
         }
     }
 
@@ -206,8 +228,18 @@ impl TimeTrackerState {
                     ui.add_space(10.0);
 
                     if ui.button("📥 Exportar a Excel (.xlsx)").clicked() {
-                        if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id) {
-                            self.export_project(proj);
+                        if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id).cloned() {
+                            self.export_project(&proj);
+                        }
+                    }
+
+                    if let Some(msg) = &self.export_message {
+                        if let Some(time) = self.export_message_time {
+                            if time.elapsed().as_secs() < 5 {
+                                ui.label(egui::RichText::new(msg).color(egui::Color32::GREEN));
+                            } else {
+                                self.export_message = None;
+                            }
                         }
                     }
 
@@ -247,17 +279,71 @@ impl TimeTrackerState {
 
                     ui.add_space(20.0);
                     ui.heading("Historial de Sesiones");
+                    let mut session_to_delete = None;
+                    let mut session_to_save = None;
+
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id) {
                             for session in &proj.sessions {
                                 ui.group(|ui| {
-                                    ui.label(egui::RichText::new(&session.name).strong());
+                                    ui.horizontal(|ui| {
+                                        if self.editing_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
+                                            ui.text_edit_singleline(&mut self.editing_session_name);
+                                            if ui.button("Guardar").clicked() {
+                                                session_to_save = Some((session.id.clone(), self.editing_session_name.clone()));
+                                                self.editing_session_id = None;
+                                            }
+                                            if ui.button("Cancelar").clicked() {
+                                                self.editing_session_id = None;
+                                            }
+                                        } else {
+                                            ui.label(egui::RichText::new(&session.name).strong());
+                                            if ui.button("✏").clicked() {
+                                                self.editing_session_id = Some((proj_id.clone(), session.id.clone()));
+                                                self.editing_session_name = session.name.clone();
+                                                self.deleting_session_id = None;
+                                            }
+
+                                            if self.deleting_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
+                                                ui.label(egui::RichText::new("¿Seguro?").color(egui::Color32::RED));
+                                                if ui.button(egui::RichText::new("Sí, eliminar").color(egui::Color32::RED)).clicked() {
+                                                    session_to_delete = Some(session.id.clone());
+                                                    self.deleting_session_id = None;
+                                                }
+                                                if ui.button("Cancelar").clicked() {
+                                                    self.deleting_session_id = None;
+                                                }
+                                            } else {
+                                                if ui.button("🗑").clicked() {
+                                                    self.deleting_session_id = Some((proj_id.clone(), session.id.clone()));
+                                                    self.editing_session_id = None;
+                                                }
+                                            }
+                                        }
+                                    });
                                     ui.label(format!("Fecha: {}", session.date.format("%Y-%m-%d %H:%M")));
                                     ui.label(format!("Duración: {} min", session.duration_secs / 60));
                                 });
                             }
                         }
                     });
+
+                    // Apply modifications after UI rendering
+                    if let Some((sess_id, new_name)) = session_to_save {
+                        if let Some(proj) = self.data.projects.iter_mut().find(|p| p.id == proj_id) {
+                            if let Some(sess) = proj.sessions.iter_mut().find(|s| s.id == sess_id) {
+                                sess.name = new_name;
+                            }
+                        }
+                        self.save();
+                    }
+
+                    if let Some(sess_id) = session_to_delete {
+                        if let Some(proj) = self.data.projects.iter_mut().find(|p| p.id == proj_id) {
+                            proj.sessions.retain(|s| s.id != sess_id);
+                        }
+                        self.save();
+                    }
                 } else {
                     ui.label("Selecciona o crea un proyecto para comenzar.");
                 }
