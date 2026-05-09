@@ -346,59 +346,61 @@ impl TimeTrackerState {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id) {
                             for session in &proj.sessions {
-                                ui.group(|ui| {
-                                    ui.horizontal(|ui| {
-                                        if self.editing_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
-                                            ui.text_edit_singleline(&mut self.editing_session_name);
-                                            if ui.button("Guardar").clicked() {
-                                                session_to_save = Some((session.id.clone(), self.editing_session_name.clone()));
-                                                self.editing_session_id = None;
-                                            }
-                                            if ui.button("Cancelar").clicked() {
-                                                self.editing_session_id = None;
-                                            }
-                                        } else {
-                                            ui.label(egui::RichText::new(&session.name).strong());
-                                            
-                                            if ui.button("▶ Continuar").clicked() {
-                                                continue_session = Some((proj_id.clone(), session.id.clone(), session.name.clone()));
-                                            }
-
-                                            if ui.button("✏").clicked() {
-                                                self.editing_session_id = Some((proj_id.clone(), session.id.clone()));
-                                                self.editing_session_name = session.name.clone();
-                                                self.deleting_session_id = None;
-                                            }
-
-                                            if self.deleting_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
-                                                ui.label(egui::RichText::new("¿Seguro?").color(egui::Color32::RED));
-                                                if ui.button(egui::RichText::new("Sí, eliminar").color(egui::Color32::RED)).clicked() {
-                                                    session_to_delete = Some(session.id.clone());
-                                                    self.deleting_session_id = None;
-                                                }
-                                                if ui.button("Cancelar").clicked() {
-                                                    self.deleting_session_id = None;
-                                                }
-                                            } else {
-                                                if ui.button("🗑").clicked() {
-                                                    self.deleting_session_id = Some((proj_id.clone(), session.id.clone()));
+                                ui.push_id(&session.id, |ui| {
+                                    ui.group(|ui| {
+                                        ui.horizontal(|ui| {
+                                            if self.editing_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
+                                                ui.text_edit_singleline(&mut self.editing_session_name);
+                                                if ui.button("Guardar").clicked() {
+                                                    session_to_save = Some((session.id.clone(), self.editing_session_name.clone()));
                                                     self.editing_session_id = None;
                                                 }
+                                                if ui.button("Cancelar").clicked() {
+                                                    self.editing_session_id = None;
+                                                }
+                                            } else {
+                                                ui.label(egui::RichText::new(&session.name).strong());
+                                                
+                                                if ui.button("▶ Continuar").clicked() {
+                                                    continue_session = Some((proj_id.clone(), session.id.clone(), session.name.clone()));
+                                                }
+
+                                                if ui.button("✏").clicked() {
+                                                    self.editing_session_id = Some((proj_id.clone(), session.id.clone()));
+                                                    self.editing_session_name = session.name.clone();
+                                                    self.deleting_session_id = None;
+                                                }
+
+                                                if self.deleting_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
+                                                    ui.label(egui::RichText::new("¿Seguro?").color(egui::Color32::RED));
+                                                    if ui.button(egui::RichText::new("Sí, eliminar").color(egui::Color32::RED)).clicked() {
+                                                        session_to_delete = Some(session.id.clone());
+                                                        self.deleting_session_id = None;
+                                                    }
+                                                    if ui.button("Cancelar").clicked() {
+                                                        self.deleting_session_id = None;
+                                                    }
+                                                } else {
+                                                    if ui.button("🗑").clicked() {
+                                                        self.deleting_session_id = Some((proj_id.clone(), session.id.clone()));
+                                                        self.editing_session_id = None;
+                                                    }
+                                                }
                                             }
+                                        });
+                                        ui.label(format!("Fecha: {}", session.date.format("%Y-%m-%d %H:%M")));
+                                        ui.label(format!("Duración total: {} min", session.total_duration() / 60));
+                                        
+                                        if !session.sub_sessions.is_empty() {
+                                            egui::CollapsingHeader::new(format!("{} sub-sesiones", session.sub_sessions.len()))
+                                                .id_salt(&session.id)
+                                                .show(ui, |ui| {
+                                                    for (idx, sub) in session.sub_sessions.iter().enumerate() {
+                                                        ui.label(format!("- {}: {} min", sub.date.format("%Y-%m-%d %H:%M"), sub.duration_secs / 60));
+                                                    }
+                                                });
                                         }
                                     });
-                                    ui.label(format!("Fecha: {}", session.date.format("%Y-%m-%d %H:%M")));
-                                    ui.label(format!("Duración total: {} min", session.total_duration() / 60));
-                                    
-                                    if !session.sub_sessions.is_empty() {
-                                        egui::CollapsingHeader::new(format!("{} sub-sesiones", session.sub_sessions.len()))
-                                            .id_source(&session.id)
-                                            .show(ui, |ui| {
-                                                for sub in &session.sub_sessions {
-                                                    ui.label(format!("- {}: {} min", sub.date.format("%Y-%m-%d %H:%M"), sub.duration_secs / 60));
-                                                }
-                                            });
-                                    }
                                 });
                             }
                         }
@@ -490,28 +492,30 @@ impl TimeTrackerState {
             let mut start_task_session = None;
 
             for task in &mut self.data.tasks {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        let mut completed = task.completed;
-                        if ui.checkbox(&mut completed, &task.name).changed() {
-                            task.completed = completed;
-                            save_needed = true;
-                        }
-                        
-                        let proj_name = self.data.projects.iter().find(|p| p.id == task.project_id).map(|p| p.name.clone()).unwrap_or_else(|| "Desconocido".to_string());
-                        ui.label(egui::RichText::new(format!("[{}]", proj_name)).color(egui::Color32::LIGHT_GRAY));
+                ui.push_id(&task.id, |ui| {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            let mut completed = task.completed;
+                            if ui.checkbox(&mut completed, &task.name).changed() {
+                                task.completed = completed;
+                                save_needed = true;
+                            }
+                            
+                            let proj_name = self.data.projects.iter().find(|p| p.id == task.project_id).map(|p| p.name.clone()).unwrap_or_else(|| "Desconocido".to_string());
+                            ui.label(egui::RichText::new(format!("[{}]", proj_name)).color(egui::Color32::LIGHT_GRAY));
 
-                        if ui.button("▶ Iniciar Sesión").clicked() {
-                            start_task_session = Some((task.project_id.clone(), task.name.clone()));
-                        }
+                            if ui.button("▶ Iniciar Sesión").clicked() {
+                                start_task_session = Some((task.project_id.clone(), task.name.clone()));
+                            }
 
-                        if ui.button("🗑").clicked() {
-                            to_delete = Some(task.id.clone());
+                            if ui.button("🗑").clicked() {
+                                to_delete = Some(task.id.clone());
+                            }
+                        });
+                        if !task.description.is_empty() {
+                            ui.label(egui::RichText::new(&task.description).italics().color(egui::Color32::DARK_GRAY));
                         }
                     });
-                    if !task.description.is_empty() {
-                        ui.label(egui::RichText::new(&task.description).italics().color(egui::Color32::DARK_GRAY));
-                    }
                 });
             }
 
