@@ -13,12 +13,28 @@ fn default_uuid() -> String {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct SubSession {
+    #[serde(default = "default_uuid")]
+    pub id: String,
+    pub date: DateTime<Local>,
+    pub duration_secs: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Session {
     #[serde(default = "default_uuid")]
     pub id: String,
     pub name: String,
     pub date: DateTime<Local>,
     pub duration_secs: u64,
+    #[serde(default)]
+    pub sub_sessions: Vec<SubSession>,
+}
+
+impl Session {
+    pub fn total_duration(&self) -> u64 {
+        self.duration_secs + self.sub_sessions.iter().map(|s| s.duration_secs).sum::<u64>()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -50,6 +66,7 @@ pub struct TimeTrackerState {
     pub data: TrackerData,
     pub active_project_id: Option<String>,
     pub active_session_name: String,
+    pub active_parent_session_id: Option<String>,
 
     pub is_tracking: bool,
     pub current_session_start: Option<Instant>,
@@ -94,6 +111,7 @@ impl TimeTrackerState {
             data,
             active_project_id: None,
             active_session_name: String::new(),
+            active_parent_session_id: None,
             is_tracking: false,
             current_session_start: None,
             current_session_elapsed: 0,
@@ -157,12 +175,23 @@ impl TimeTrackerState {
         if secs > 0 {
             if let Some(proj_id) = &self.active_project_id {
                 if let Some(proj) = self.data.projects.iter_mut().find(|p| &p.id == proj_id) {
-                    proj.sessions.push(Session {
-                        id: default_uuid(),
-                        name: self.active_session_name.trim().to_string(),
-                        date: Local::now(),
-                        duration_secs: secs,
-                    });
+                    if let Some(parent_id) = &self.active_parent_session_id {
+                        if let Some(parent_sess) = proj.sessions.iter_mut().find(|s| &s.id == parent_id) {
+                            parent_sess.sub_sessions.push(SubSession {
+                                id: default_uuid(),
+                                date: Local::now(),
+                                duration_secs: secs,
+                            });
+                        }
+                    } else {
+                        proj.sessions.push(Session {
+                            id: default_uuid(),
+                            name: self.active_session_name.trim().to_string(),
+                            date: Local::now(),
+                            duration_secs: secs,
+                            sub_sessions: Vec::new(),
+                        });
+                    }
                 }
             }
         }
@@ -171,6 +200,7 @@ impl TimeTrackerState {
         self.current_session_start = None;
         self.current_session_elapsed = 0;
         self.active_session_name.clear();
+        self.active_parent_session_id = None;
         self.save();
     }
 
@@ -190,8 +220,8 @@ impl TimeTrackerState {
             let _ = sheet.write_string(row, 0, &proj.name);
             let _ = sheet.write_string(row, 1, &session.name);
             let _ = sheet.write_string(row, 2, &session.date.format("%Y-%m-%d %H:%M:%S").to_string());
-            let _ = sheet.write_number(row, 3, session.duration_secs as f64 / 3600.0);
-            let _ = sheet.write_number(row, 4, session.duration_secs as f64 / 60.0);
+            let _ = sheet.write_number(row, 3, session.total_duration() as f64 / 3600.0);
+            let _ = sheet.write_number(row, 4, session.total_duration() as f64 / 60.0);
         }
 
         let default_name = format!("{}_Export_{}.xlsx", proj.name.replace(" ", "_"), Local::now().format("%Y%m%d"));
@@ -267,14 +297,18 @@ impl TimeTrackerState {
                     ui.add_space(20.0);
                     
                     ui.group(|ui| {
-                        ui.heading("Nueva Sesión de Trabajo");
-                        ui.horizontal(|ui| {
-                            ui.label("Nombre de sesión:");
-                            ui.add_enabled(
-                                !self.is_tracking,
-                                egui::TextEdit::singleline(&mut self.active_session_name),
-                            );
-                        });
+                        if let Some(_) = &self.active_parent_session_id {
+                            ui.heading(format!("Continuando sesión: {}", self.active_session_name));
+                        } else {
+                            ui.heading("Nueva Sesión de Trabajo");
+                            ui.horizontal(|ui| {
+                                ui.label("Nombre de sesión:");
+                                ui.add_enabled(
+                                    !self.is_tracking,
+                                    egui::TextEdit::singleline(&mut self.active_session_name),
+                                );
+                            });
+                        }
 
                         let mut current_secs = self.current_session_elapsed;
                         if let Some(start) = self.current_session_start {
@@ -303,6 +337,8 @@ impl TimeTrackerState {
                     let mut session_to_delete = None;
                     let mut session_to_save = None;
 
+                    let mut continue_session = None;
+
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id) {
                             for session in &proj.sessions {
@@ -319,6 +355,11 @@ impl TimeTrackerState {
                                             }
                                         } else {
                                             ui.label(egui::RichText::new(&session.name).strong());
+                                            
+                                            if ui.button("▶ Continuar").clicked() {
+                                                continue_session = Some((proj_id.clone(), session.id.clone(), session.name.clone()));
+                                            }
+
                                             if ui.button("✏").clicked() {
                                                 self.editing_session_id = Some((proj_id.clone(), session.id.clone()));
                                                 self.editing_session_name = session.name.clone();
@@ -343,11 +384,32 @@ impl TimeTrackerState {
                                         }
                                     });
                                     ui.label(format!("Fecha: {}", session.date.format("%Y-%m-%d %H:%M")));
-                                    ui.label(format!("Duración: {} min", session.duration_secs / 60));
+                                    ui.label(format!("Duración total: {} min", session.total_duration() / 60));
+                                    
+                                    if !session.sub_sessions.is_empty() {
+                                        egui::CollapsingHeader::new(format!("{} sub-sesiones", session.sub_sessions.len()))
+                                            .id_source(&session.id)
+                                            .show(ui, |ui| {
+                                                for sub in &session.sub_sessions {
+                                                    ui.label(format!("- {}: {} min", sub.date.format("%Y-%m-%d %H:%M"), sub.duration_secs / 60));
+                                                }
+                                            });
+                                    }
                                 });
                             }
                         }
                     });
+
+                    // Handle continue session after UI
+                    if let Some((p_id, s_id, s_name)) = continue_session {
+                        self.active_project_id = Some(p_id);
+                        self.active_parent_session_id = Some(s_id);
+                        self.active_session_name = s_name;
+                        if !self.is_tracking {
+                            self.is_tracking = true;
+                            self.current_session_start = Some(Instant::now());
+                        }
+                    }
 
                     // Apply modifications after UI rendering
                     if let Some((sess_id, new_name)) = session_to_save {
