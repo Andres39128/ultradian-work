@@ -5,6 +5,6 @@ Name=Ultradian Timer
 Comment=Cronómetro de trabajo profundo y ritmos ultradianos
 Exec=ultradian-timer
 Icon=ultradian-timer
-Terminal=true
+Terminal=false
 Categories=Utility;TimeUtility;
 StartupNotify=true

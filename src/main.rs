@@ -1,22 +1,6 @@
+use eframe::egui;
+use std::time::{Duration, Instant};
 use clap::Parser;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
-    Frame, Terminal,
-};
-use std::{
-    error::Error,
-    io,
-    time::{Duration, Instant},
-};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -32,67 +16,40 @@ struct Args {
 
 #[derive(Clone, Copy, PartialEq)]
 enum TimerState {
+    Idle,
     Work,
     Rest,
     PausedWork,
     PausedRest,
 }
 
-struct App {
+struct UltradianApp {
     state: TimerState,
     work_duration: Duration,
     rest_duration: Duration,
     timer_start: Instant,
     time_remaining: Duration,
-    should_quit: bool,
 }
 
-impl App {
-    fn new(work_mins: u64, rest_mins: u64) -> App {
+impl UltradianApp {
+    fn new(work_mins: u64, rest_mins: u64) -> Self {
         let work_duration = Duration::from_secs(work_mins * 60);
         let rest_duration = Duration::from_secs(rest_mins * 60);
-        App {
-            state: TimerState::Work,
+        Self {
+            state: TimerState::Idle,
             work_duration,
             rest_duration,
             timer_start: Instant::now(),
             time_remaining: work_duration,
-            should_quit: false,
-        }
-    }
-
-    fn tick(&mut self) {
-        if self.state == TimerState::Work || self.state == TimerState::Rest {
-            let elapsed = self.timer_start.elapsed();
-            let total = match self.state {
-                TimerState::Work => self.work_duration,
-                TimerState::Rest => self.rest_duration,
-                _ => unreachable!(),
-            };
-
-            if elapsed >= total {
-                // Transition state
-                match self.state {
-                    TimerState::Work => {
-                        self.state = TimerState::Rest;
-                        self.time_remaining = self.rest_duration;
-                        self.timer_start = Instant::now();
-                    }
-                    TimerState::Rest => {
-                        self.state = TimerState::Work;
-                        self.time_remaining = self.work_duration;
-                        self.timer_start = Instant::now();
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                self.time_remaining = total - elapsed;
-            }
         }
     }
 
     fn toggle_pause(&mut self) {
         match self.state {
+            TimerState::Idle => {
+                self.state = TimerState::Work;
+                self.timer_start = Instant::now();
+            }
             TimerState::Work => {
                 self.state = TimerState::PausedWork;
             }
@@ -113,6 +70,7 @@ impl App {
 
     fn reset(&mut self) {
         match self.state {
+            TimerState::Idle => {}
             TimerState::Work | TimerState::PausedWork => {
                 self.state = TimerState::Work;
                 self.time_remaining = self.work_duration;
@@ -125,164 +83,126 @@ impl App {
             }
         }
     }
-}
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+    fn tick(&mut self, ctx: &egui::Context) {
+        if self.state == TimerState::Work || self.state == TimerState::Rest {
+            let elapsed = self.timer_start.elapsed();
+            let total = match self.state {
+                TimerState::Work => self.work_duration,
+                TimerState::Rest => self.rest_duration,
+                _ => unreachable!(),
+            };
 
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // Create app
-    let mut app = App::new(args.work, args.rest);
-
-    // Run app
-    let res = run_app(&mut terminal, &mut app);
-
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
-    if let Err(err) = res {
-        println!("{:?}", err)
-    }
-
-    Ok(())
-}
-
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), Box<dyn Error>> 
-where 
-    <B as ratatui::backend::Backend>::Error: 'static,
-{
-    let tick_rate = Duration::from_millis(250);
-    let mut last_tick = Instant::now();
-
-    while !app.should_quit {
-        terminal.draw(|f| ui(f, app))?;
-
-        let timeout = tick_rate
-            .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
-
-        if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == event::KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                        KeyCode::Char(' ') => app.toggle_pause(),
-                        KeyCode::Char('r') => app.reset(),
-                        _ => {}
+            if elapsed >= total {
+                // Transition state
+                match self.state {
+                    TimerState::Work => {
+                        self.state = TimerState::Rest;
+                        self.time_remaining = self.rest_duration;
+                        self.timer_start = Instant::now();
+                        // Al entrar en descanso, forzamos pantalla completa
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
                     }
+                    TimerState::Rest => {
+                        self.state = TimerState::Work;
+                        self.time_remaining = self.work_duration;
+                        self.timer_start = Instant::now();
+                        // Al terminar descanso, salimos de pantalla completa
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                    }
+                    _ => unreachable!(),
                 }
+            } else {
+                self.time_remaining = total - elapsed;
             }
         }
-
-        if last_tick.elapsed() >= tick_rate {
-            app.tick();
-            last_tick = Instant::now();
-        }
     }
-
-    Ok(())
 }
 
-fn ui(f: &mut Frame, app: &App) {
-    if app.state == TimerState::Rest || app.state == TimerState::PausedRest {
-        // En descanso, pantalla completamente en negro con un contador mínimo
-        let secs = app.time_remaining.as_secs();
-        let display = format!("{:02}:{:02}", secs / 60, secs % 60);
-        
-        let mut status = "Descanso Neurologico";
-        if app.state == TimerState::PausedRest {
-            status = "Descanso (Pausado)";
+impl eframe::App for UltradianApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.tick(ctx);
+
+        // Repintar frecuentemente para mantener el contador visualmente al día
+        ctx.request_repaint_after(Duration::from_millis(200));
+
+        // Entradas de teclado
+        if ctx.input(|i| i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Enter)) {
+            self.toggle_pause();
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::R)) {
+            self.reset();
         }
 
-        let block = Block::default().style(Style::default().bg(Color::Black).fg(Color::DarkGray));
-        f.render_widget(block, f.area());
+        let is_rest = self.state == TimerState::Rest || self.state == TimerState::PausedRest;
 
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(45),
-                Constraint::Length(3),
-                Constraint::Percentage(45),
-            ])
-            .split(f.area());
+        let frame_style = if is_rest {
+            egui::Frame::default().fill(egui::Color32::BLACK)
+        } else {
+            egui::Frame::default().fill(egui::Color32::from_rgb(15, 20, 25))
+        };
 
-        let text = vec![
-            Line::from(Span::styled(status, Style::default().fg(Color::DarkGray))),
-            Line::from(Span::styled(display, Style::default().fg(Color::DarkGray))),
-            Line::from(Span::styled("No pantallas. Cero ingresos cognitivos.", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))),
-        ];
+        egui::CentralPanel::default().frame(frame_style).show(ctx, |ui| {
+            ui.centered_and_justified(|ui| {
+                let secs = self.time_remaining.as_secs();
+                let display = format!("{:02}:{:02}", secs / 60, secs % 60);
 
-        let paragraph = Paragraph::new(text).alignment(Alignment::Center);
-        f.render_widget(paragraph, layout[1]);
+                if is_rest {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 2.0 - 100.0); // Simple center offset
+                        ui.label(egui::RichText::new("Descanso Neurológico").color(egui::Color32::DARK_GRAY).size(30.0));
+                        ui.add_space(20.0);
+                        ui.label(egui::RichText::new(display).color(egui::Color32::DARK_GRAY).size(80.0).strong());
+                        ui.add_space(20.0);
+                        ui.label(egui::RichText::new("No pantallas. Cero ingresos cognitivos.").color(egui::Color32::DARK_GRAY).size(20.0).italics());
+                        if self.state == TimerState::PausedRest {
+                            ui.add_space(20.0);
+                            ui.label(egui::RichText::new("(PAUSADO)").color(egui::Color32::DARK_GRAY).size(20.0));
+                        }
+                    });
+                } else {
+                    let (status, color) = match self.state {
+                        TimerState::Idle => ("ESPERANDO INICIO", egui::Color32::CYAN),
+                        TimerState::Work => ("TRABAJO PROFUNDO", egui::Color32::GREEN),
+                        TimerState::PausedWork => ("PAUSADO", egui::Color32::YELLOW),
+                        _ => ("", egui::Color32::WHITE),
+                    };
 
-        return;
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 2.0 - 150.0);
+                        ui.label(egui::RichText::new(status).color(color).size(40.0).strong());
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new(display).color(color).size(120.0).strong());
+                        ui.add_space(60.0);
+                        
+                        let help_text = if self.state == TimerState::Idle {
+                            "[Enter] o [Espacio] Iniciar"
+                        } else {
+                            "[Espacio] Pausa/Reanudar | [R] Reiniciar fase"
+                        };
+                        ui.label(egui::RichText::new(help_text).color(egui::Color32::GRAY).size(20.0));
+                    });
+                }
+            });
+        });
     }
+}
 
-    // Modo trabajo
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(2),
-            Constraint::Length(3),
-        ])
-        .split(f.area());
+fn main() -> eframe::Result<()> {
+    let args = Args::parse();
+    let app = UltradianApp::new(args.work, args.rest);
 
-    let title_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-    let title = Paragraph::new(" Ritmos Ultradianos - Trabajo Profundo ")
-        .style(title_style)
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL).style(title_style));
-    f.render_widget(title, chunks[0]);
-
-    let secs = app.time_remaining.as_secs();
-    let display = format!("{:02}:{:02}", secs / 60, secs % 60);
-
-    let (status_text, color) = match app.state {
-        TimerState::Work => ("TRABAJO PROFUNDO", Color::Green),
-        TimerState::PausedWork => ("PAUSADO", Color::Yellow),
-        _ => ("", Color::White),
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_min_inner_size([400.0, 300.0])
+            .with_title("Ultradian Timer"),
+        ..Default::default()
     };
 
-    let timer_text = vec![
-        Line::from(Span::styled(status_text, Style::default().fg(color).add_modifier(Modifier::BOLD))),
-        Line::from(""),
-        Line::from(Span::styled(display, Style::default().fg(color).add_modifier(Modifier::BOLD))),
-    ];
-
-    let timer_para = Paragraph::new(timer_text)
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::NONE));
-    
-    // Centrar verticalmente el temporizador
-    let inner_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(40),
-            Constraint::Length(4),
-            Constraint::Percentage(40),
-        ])
-        .split(chunks[1]);
-        
-    f.render_widget(timer_para, inner_layout[1]);
-
-    let help_text = " [Espacio] Pausa/Reanudar | [r] Reiniciar fase | [q] Salir ";
-    let help_para = Paragraph::new(help_text)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    f.render_widget(help_para, chunks[2]);
+    eframe::run_native(
+        "Ultradian Timer",
+        options,
+        Box::new(|_cc| Ok(Box::new(app))),
+    )
 }
