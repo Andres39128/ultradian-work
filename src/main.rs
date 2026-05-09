@@ -30,6 +30,7 @@ enum TimerState {
 enum AppView {
     Ultradian,
     Tracker,
+    Tasks,
 }
 
 struct AppState {
@@ -152,6 +153,7 @@ impl eframe::App for AppState {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.view, AppView::Ultradian, "🍅 Ultradian Timer");
                     ui.selectable_value(&mut self.view, AppView::Tracker, "⏱ Time Tracker");
+                    ui.selectable_value(&mut self.view, AppView::Tasks, "📋 Pendientes");
                 });
             });
         }
@@ -160,6 +162,11 @@ impl eframe::App for AppState {
             match self.view {
                 AppView::Ultradian => self.ui_ultradian(ctx, ui, is_rest),
                 AppView::Tracker => self.tracker.ui(ctx, ui),
+                AppView::Tasks => {
+                    if self.tracker.ui_tasks(ctx, ui) {
+                        self.view = AppView::Tracker;
+                    }
+                }
             }
         });
     }
