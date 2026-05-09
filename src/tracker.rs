@@ -1,96 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use crate::i18n::Language;
 use eframe::egui;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub enum Priority {
-    Alta,
-    Media,
-    Baja,
-}
-impl Default for Priority {
-    fn default() -> Self { Priority::Media }
-}
-
-fn default_language() -> Language { Language::Es }
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct TrackerData {
-    #[serde(default = "default_language")]
-    pub language: Language,
-    #[serde(default)]
-    pub work_duration_mins: u64,
-    #[serde(default)]
-    pub rest_duration_mins: u64,
-    pub projects: Vec<Project>,
-    pub tasks: Vec<Task>,
-}
-
-impl Default for TrackerData {
-    fn default() -> Self {
-        Self {
-            language: default_language(),
-            work_duration_mins: 90,
-            rest_duration_mins: 15,
-            projects: Vec::new(),
-            tasks: Vec::new(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Project {
-    pub id: String,
-    pub name: String,
-    pub sessions: Vec<Session>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Session {
-    pub id: String,
-    pub name: String,
-    pub start_time: u64,
-    pub end_time: u64,
-    pub sub_sessions: Vec<SubSession>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct SubSession {
-    pub start_time: u64,
-    pub end_time: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Task {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub completed: bool,
-    pub project: Option<String>,
-    #[serde(default)]
-    pub priority: Priority,
-    #[serde(default)]
-    pub tags: String,
-    #[serde(default)]
-    pub deadline: String,
-}
-
-impl Project {
-    pub fn total_duration(&self) -> u64 {
-        self.sessions.iter().map(|s| {
-            let mut total = if s.end_time >= s.start_time { s.end_time - s.start_time } else { 0 };
-            for sub in &s.sub_sessions {
-                if sub.end_time >= sub.start_time {
-                    total += sub.end_time - sub.start_time;
-                }
-            }
-            total
-        }).sum()
-    }
-}
+pub use crate::models::*;
 
 pub struct TimeTrackerState {
     pub data: TrackerData,
@@ -685,35 +598,39 @@ impl TimeTrackerState {
                     let mut imported = 0;
                     for (i, row) in range.rows().enumerate() {
                         if i == 0 { continue; } 
-                        if row.is_empty() { continue; }
+                        if row.is_empty() || row.iter().all(|c| c.to_string().trim().is_empty()) { continue; }
 
-                        let name = row.get(0).map(|c| c.to_string()).unwrap_or_default();
+                        let name = row.get(0).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
                         if name.is_empty() { continue; }
 
-                        let description = row.get(1).map(|c| c.to_string()).unwrap_or_default();
+                        let description = row.get(1).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
                         
-                        let proj_name = row.get(2).map(|c| c.to_string()).unwrap_or_default();
+                        let proj_name = row.get(2).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
                         let project = if proj_name.is_empty() {
                             None
                         } else {
-                            if let Some(p) = self.data.projects.iter().find(|p| p.name == proj_name) {
+                            if let Some(p) = self.data.projects.iter().find(|p| p.name.trim().to_lowercase() == proj_name.to_lowercase()) {
                                 Some(p.id.clone())
                             } else {
                                 let id = uuid::Uuid::new_v4().to_string();
                                 self.data.projects.push(Project {
                                     id: id.clone(),
-                                    name: proj_name,
+                                    name: proj_name.clone(),
                                     sessions: Vec::new()
                                 });
                                 Some(id)
                             }
                         };
 
+                        if self.data.tasks.iter().any(|t| t.name.trim().to_lowercase() == name.to_lowercase() && t.project == project) {
+                            continue;
+                        }
+
                         let completed = row.get(3).map(|c| c.to_string() == "Si").unwrap_or(false);
                         let priority_str = row.get(4).map(|c| c.to_string()).unwrap_or_default();
-                        let priority = match priority_str.as_str() { "Alta" => Priority::Alta, "Baja" => Priority::Baja, _ => Priority::Media };
-                        let tags = row.get(5).map(|c| c.to_string()).unwrap_or_default();
-                        let deadline = row.get(6).map(|c| c.to_string()).unwrap_or_default();
+                        let priority = match priority_str.trim() { "Alta" => Priority::Alta, "Baja" => Priority::Baja, _ => Priority::Media };
+                        let tags = row.get(5).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+                        let deadline = row.get(6).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
 
                         self.data.tasks.push(Task {
                             id: uuid::Uuid::new_v4().to_string(),

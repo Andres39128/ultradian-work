@@ -5,6 +5,7 @@ use notify_rust::Notification;
 use std::process::Command;
 
 mod i18n;
+mod models;
 mod tracker;
 use tracker::TimeTrackerState;
 
