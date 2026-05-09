@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Ultradian Timer
+Comment=Cronómetro de trabajo profundo y ritmos ultradianos
+Exec=ultradian-timer
+Icon=ultradian-timer
+Terminal=true
+Categories=Utility;TimeUtility;
+StartupNotify=true
