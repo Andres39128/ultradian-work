@@ -175,6 +175,8 @@ impl TimeTrackerState {
         if secs > 0 {
             if let Some(proj_id) = &self.active_project_id {
                 if let Some(proj) = self.data.projects.iter_mut().find(|p| &p.id == proj_id) {
+                    let mut added_to_parent = false;
+                    
                     if let Some(parent_id) = &self.active_parent_session_id {
                         if let Some(parent_sess) = proj.sessions.iter_mut().find(|s| &s.id == parent_id) {
                             parent_sess.sub_sessions.push(SubSession {
@@ -182,8 +184,11 @@ impl TimeTrackerState {
                                 date: Local::now(),
                                 duration_secs: secs,
                             });
+                            added_to_parent = true;
                         }
-                    } else {
+                    }
+                    
+                    if !added_to_parent {
                         proj.sessions.push(Session {
                             id: default_uuid(),
                             name: self.active_session_name.trim().to_string(),
@@ -517,12 +522,16 @@ impl TimeTrackerState {
             }
 
             if let Some((proj_id, task_name)) = start_task_session {
-                self.active_project_id = Some(proj_id);
-                self.active_session_name = task_name;
-                if !self.is_tracking {
-                    self.is_tracking = true;
-                    self.current_session_start = Some(Instant::now());
+                if self.is_tracking {
+                    self.finish_session(); // Guarda la sesión que estaba corriendo actualmente
                 }
+                
+                self.active_project_id = Some(proj_id);
+                self.active_parent_session_id = None; // Resetear padre porque es una nueva sesión desde tarea
+                self.active_session_name = task_name;
+                self.is_tracking = true;
+                self.current_session_elapsed = 0;
+                self.current_session_start = Some(Instant::now());
                 switch_to_tracker = true;
             }
 
