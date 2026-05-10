@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-echo "Compilando ultradian-timer en modo release..."
+echo "Compilando ultradian-work en modo release..."
 cargo build --release
 
-BIN_PATH="target/release/ultradian-timer"
+BIN_PATH="target/release/ultradian-work"
 DEST_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
@@ -16,11 +16,11 @@ mkdir -p "$ICON_DIR"
 
 echo "Instalando binario en $DEST_DIR..."
 cp "$BIN_PATH" "$DEST_DIR/"
-chmod +x "$DEST_DIR/ultradian-timer"
+chmod +x "$DEST_DIR/ultradian-work"
 
 echo "Instalando icono y acceso directo..."
-cp assets/icon.svg "$ICON_DIR/ultradian-timer.svg"
-cp assets/ultradian-timer.desktop "$APP_DIR/"
+cp assets/icon.svg "$ICON_DIR/ultradian-work.svg"
+cp assets/ultradian-work.desktop "$APP_DIR/"
 update-desktop-database "$HOME/.local/share/applications" || true
 
 # Asegurar que está en el PATH temporalmente si no lo está (instrucción)
@@ -29,4 +29,4 @@ if [[ ":$PATH:" != *":$DEST_DIR:"* ]]; then
     echo "Agrega 'export PATH=\"\$HOME/.local/bin:\$PATH\"' a tu ~/.bashrc o ~/.zshrc"
 fi
 
-echo "¡Instalación exitosa! Busca 'Ultradian Timer' en el menú de aplicaciones de tu sistema."
+echo "¡Instalación exitosa! Busca 'Ultradian Work' en el menú de aplicaciones de tu sistema."
