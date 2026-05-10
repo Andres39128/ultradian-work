@@ -164,16 +164,7 @@ impl TimeTrackerState {
         self.save();
     }
 
-    fn export_project(&mut self, proj: &Project) {
-        let file_path = if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Excel Workbook", &["xlsx"])
-            .set_file_name(&format!("{}_export.xlsx", proj.name))
-            .save_file() {
-                path
-        } else {
-            return;
-        };
-
+    fn export_project_to_file(&mut self, proj: &Project, file_path: &std::path::Path) {
         let mut workbook = rust_xlsxwriter::Workbook::new();
         let worksheet = workbook.add_worksheet();
         {
@@ -196,7 +187,7 @@ impl TimeTrackerState {
                 row += 1;
             }
 
-            if workbook.save(&file_path).is_ok() {
+            if workbook.save(file_path).is_ok() {
                 self.export_message = Some(format!("Exportado a {:?}", file_path.display()));
                 self.export_message_time = Some(Instant::now());
             } else {
@@ -207,12 +198,13 @@ impl TimeTrackerState {
     }
 
     pub fn ui(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+        let lang = self.data.language;
         ui.add_space(10.0);
 
         ui.horizontal(|ui| {
-            ui.label("Nuevo Proyecto:");
+            ui.label(crate::i18n::t(&lang, "new_project"));
             ui.text_edit_singleline(&mut self.new_project_name);
-            if ui.button("Crear").clicked() {
+            if ui.button(crate::i18n::t(&lang, "create")).clicked() {
                 self.add_project();
             }
         });
@@ -224,7 +216,7 @@ impl TimeTrackerState {
             ui.vertical(|ui| {
                 ui.set_min_height(available_height);
                 ui.set_width(200.0);
-                ui.heading("Tus Proyectos");
+                ui.heading(crate::i18n::t(&lang, "your_projects"));
                 for proj in &self.data.projects {
                     let is_selected = self.active_project_id.as_deref() == Some(&proj.id);
                     if ui.selectable_label(is_selected, &proj.name).clicked() {
@@ -246,9 +238,14 @@ impl TimeTrackerState {
                     ui.heading(format!("Proyecto: {}", proj_name));
                     ui.add_space(10.0);
 
-                    if ui.button("📥 Exportar a Excel (.xlsx)").clicked() {
+                    if ui.button(crate::i18n::t(&lang, "export_excel")).clicked() {
                         if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id).cloned() {
-                            self.export_project(&proj);
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Excel Workbook", &["xlsx"])
+                                .set_file_name(&format!("{}_export.xlsx", proj.name))
+                                .save_file() {
+                                self.export_project_to_file(&proj, &path);
+                            }
                         }
                     }
 
@@ -268,9 +265,9 @@ impl TimeTrackerState {
                         if let Some(_) = &self.active_parent_session_id {
                             ui.heading(format!("Continuando sesión: {}", self.active_session_name));
                         } else {
-                            ui.heading("Nueva Sesión de Trabajo");
+                            ui.heading(crate::i18n::t(&lang, "new_work_session"));
                             ui.horizontal(|ui| {
-                                ui.label("Nombre:");
+                                ui.label(crate::i18n::t(&lang, "name"));
                                 ui.add_enabled(
                                     !self.is_tracking,
                                     egui::TextEdit::singleline(&mut self.active_session_name),
@@ -287,13 +284,13 @@ impl TimeTrackerState {
                         ui.label(egui::RichText::new(display).size(30.0).strong().color(if self.is_tracking { egui::Color32::GREEN } else { egui::Color32::WHITE }));
 
                         ui.horizontal(|ui| {
-                            let btn_text = if self.is_tracking { "⏸ Pausar" } else { "▶ Empezar" };
+                            let btn_text = if self.is_tracking { crate::i18n::t(&lang, "pause") } else { crate::i18n::t(&lang, "start") };
                             if ui.button(btn_text).clicked() {
                                 self.toggle_tracking();
                             }
 
                             if current_secs > 0 || self.active_parent_session_id.is_some() {
-                                if ui.button("⏹ Finalizar y Guardar").clicked() {
+                                if ui.button(crate::i18n::t(&lang, "finish_save")).clicked() {
                                     self.finish_session();
                                 }
                             }
@@ -302,7 +299,7 @@ impl TimeTrackerState {
 
                     ui.add_space(20.0);
                     ui.horizontal(|ui| {
-                        ui.heading("Historial de Sesiones");
+                        ui.heading(crate::i18n::t(&lang, "session_history"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.text_edit_singleline(&mut self.session_search_query);
                             ui.label("🔍");
@@ -327,17 +324,17 @@ impl TimeTrackerState {
                                         ui.horizontal(|ui| {
                                             if self.editing_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
                                                 ui.text_edit_singleline(&mut self.editing_session_name);
-                                                if ui.button("Guardar").clicked() {
+                                                if ui.button(crate::i18n::t(&lang, "save")).clicked() {
                                                     session_to_save = Some((session.id.clone(), self.editing_session_name.clone()));
                                                     self.editing_session_id = None;
                                                 }
-                                                if ui.button("Cancelar").clicked() {
+                                                if ui.button(crate::i18n::t(&lang, "cancel")).clicked() {
                                                     self.editing_session_id = None;
                                                 }
                                             } else {
                                                 ui.label(egui::RichText::new(&session.name).strong());
                                                 
-                                                if ui.button("Continuar").clicked() {
+                                                if ui.button(crate::i18n::t(&lang, "continue")).clicked() {
                                                     continue_session = Some((proj_id.clone(), session.id.clone(), session.name.clone()));
                                                 }
 
@@ -402,10 +399,10 @@ impl TimeTrackerState {
                             .show(ui.ctx(), |ui| {
                                 ui.label("¿Estás seguro de que deseas eliminar esta sesión? Esta acción no se puede deshacer.");
                                 ui.horizontal(|ui| {
-                                    if ui.button("Sí, Eliminar").clicked() {
+                                    if ui.button(crate::i18n::t(&lang, "yes_delete")).clicked() {
                                         confirm_delete = true;
                                     }
-                                    if ui.button("Cancelar").clicked() {
+                                    if ui.button(crate::i18n::t(&lang, "cancel")).clicked() {
                                         cancel_delete = true;
                                     }
                                 });
@@ -434,14 +431,24 @@ impl TimeTrackerState {
     }
 
     pub fn ui_tasks(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) -> bool {
+        let lang = self.data.language;
         let mut redirect_to_tracker = false;
 
         ui.horizontal(|ui| {
-            if ui.button("📤 Exportar Pendientes").clicked() {
-                self.export_tasks();
+            if ui.button(crate::i18n::t(&lang, "export_tasks")).clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Excel Workbook", &["xlsx"])
+                    .set_file_name("pendientes_export.xlsx")
+                    .save_file() {
+                    self.export_tasks_to_file(&path);
+                }
             }
-            if ui.button("📥 Importar Pendientes").clicked() {
-                self.import_tasks();
+            if ui.button(crate::i18n::t(&lang, "import_tasks")).clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Excel Workbook", &["xlsx"])
+                    .pick_file() {
+                    self.import_tasks_from_file(&path);
+                }
             }
         });
         
@@ -458,9 +465,9 @@ impl TimeTrackerState {
         ui.separator();
 
         ui.group(|ui| {
-            ui.heading("Nuevo Pendiente");
+            ui.heading(crate::i18n::t(&lang, "new_task"));
             ui.horizontal(|ui| {
-                ui.label("Nombre:");
+                ui.label(crate::i18n::t(&lang, "name"));
                 ui.text_edit_singleline(&mut self.new_task_name);
             });
             ui.horizontal(|ui| {
@@ -475,30 +482,30 @@ impl TimeTrackerState {
                     });
             });
             ui.horizontal(|ui| {
-                ui.label("Prioridad:");
-                ui.radio_value(&mut self.new_task_priority, Priority::Alta, "Alta");
-                ui.radio_value(&mut self.new_task_priority, Priority::Media, "Media");
-                ui.radio_value(&mut self.new_task_priority, Priority::Baja, "Baja");
+                ui.label(crate::i18n::t(&lang, "priority"));
+                ui.radio_value(&mut self.new_task_priority, Priority::Alta, crate::i18n::t(&lang, "high"));
+                ui.radio_value(&mut self.new_task_priority, Priority::Media, crate::i18n::t(&lang, "medium"));
+                ui.radio_value(&mut self.new_task_priority, Priority::Baja, crate::i18n::t(&lang, "low"));
             });
             ui.horizontal(|ui| {
-                ui.label("Tags (coma separados):");
+                ui.label(crate::i18n::t(&lang, "tags_comma"));
                 ui.text_edit_singleline(&mut self.new_task_tags);
             });
             ui.horizontal(|ui| {
-                ui.label("Fecha límite:");
+                ui.label(crate::i18n::t(&lang, "deadline"));
                 ui.text_edit_singleline(&mut self.new_task_deadline);
             });
             ui.horizontal(|ui| {
-                ui.label("Descripción:");
+                ui.label(crate::i18n::t(&lang, "description"));
                 ui.text_edit_multiline(&mut self.new_task_description);
             });
-            if ui.button("Crear Tarea").clicked() {
+            if ui.button(crate::i18n::t(&lang, "create_task")).clicked() {
                 self.create_task();
             }
         });
 
         ui.add_space(20.0);
-        ui.heading("Lista de Pendientes");
+        ui.heading(crate::i18n::t(&lang, "todo_list"));
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -539,7 +546,7 @@ impl TimeTrackerState {
                         }
                         ui.horizontal(|ui| {
                             let color = match task.priority { Priority::Alta => egui::Color32::RED, Priority::Media => egui::Color32::YELLOW, Priority::Baja => egui::Color32::GREEN };
-                            ui.label(egui::RichText::new(match task.priority { Priority::Alta => "Alta", Priority::Media => "Media", Priority::Baja => "Baja" }).color(color));
+                            ui.label(egui::RichText::new(match task.priority { Priority::Alta => crate::i18n::t(&lang, "high"), Priority::Media => crate::i18n::t(&lang, "medium"), Priority::Baja => crate::i18n::t(&lang, "low") }).color(color));
                             if !task.tags.is_empty() { ui.label(format!("🏷 {}", task.tags)); }
                             if !task.deadline.is_empty() { ui.label(format!("📅 {}", task.deadline)); }
                         });
@@ -588,114 +595,112 @@ impl TimeTrackerState {
         self.save();
     }
 
-    fn import_tasks(&mut self) {
+    fn import_tasks_from_file(&mut self, path: &std::path::Path) {
+        let lang = self.data.language;
         use calamine::{Reader, open_workbook_auto};
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Excel Workbook", &["xlsx"])
-            .pick_file() {
-            if let Ok(mut workbook) = open_workbook_auto(&path) {
-                if let Ok(range) = workbook.worksheet_range("Pendientes") {
-                    let mut imported = 0;
-                    for (i, row) in range.rows().enumerate() {
-                        if i == 0 { continue; } 
-                        if row.is_empty() || row.iter().all(|c| c.to_string().trim().is_empty()) { continue; }
+        if let Ok(mut workbook) = open_workbook_auto(path) {
+            if let Ok(range) = workbook.worksheet_range("Pendientes") {
+                let mut imported = 0;
+                for (i, row) in range.rows().enumerate() {
+                    if i == 0 { continue; } 
+                    if row.is_empty() || row.iter().all(|c| c.to_string().trim().is_empty()) { continue; }
 
-                        let name = row.get(0).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-                        if name.is_empty() { continue; }
+                    let name = row.get(0).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+                    if name.is_empty() { continue; }
 
-                        let description = row.get(1).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-                        
-                        let proj_name = row.get(2).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-                        let project = if proj_name.is_empty() {
-                            None
+                    let description = row.get(1).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+                    
+                    let proj_name = row.get(2).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+                    let project = if proj_name.is_empty() {
+                        None
+                    } else {
+                        if let Some(p) = self.data.projects.iter().find(|p| p.name.trim().to_lowercase() == proj_name.to_lowercase()) {
+                            Some(p.id.clone())
                         } else {
-                            if let Some(p) = self.data.projects.iter().find(|p| p.name.trim().to_lowercase() == proj_name.to_lowercase()) {
-                                Some(p.id.clone())
-                            } else {
-                                let id = uuid::Uuid::new_v4().to_string();
-                                self.data.projects.push(Project {
-                                    id: id.clone(),
-                                    name: proj_name.clone(),
-                                    sessions: Vec::new()
-                                });
-                                Some(id)
-                            }
-                        };
-
-                        if self.data.tasks.iter().any(|t| t.name.trim().to_lowercase() == name.to_lowercase() && t.project == project) {
-                            continue;
+                            let id = uuid::Uuid::new_v4().to_string();
+                            self.data.projects.push(Project {
+                                id: id.clone(),
+                                name: proj_name.clone(),
+                                sessions: Vec::new()
+                            });
+                            Some(id)
                         }
+                    };
 
-                        let completed = row.get(3).map(|c| c.to_string() == "Si").unwrap_or(false);
-                        let priority_str = row.get(4).map(|c| c.to_string()).unwrap_or_default();
-                        let priority = match priority_str.trim() { "Alta" => Priority::Alta, "Baja" => Priority::Baja, _ => Priority::Media };
-                        let tags = row.get(5).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-                        let deadline = row.get(6).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-
-                        self.data.tasks.push(Task {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            name,
-                            description,
-                            project,
-                            completed,
-                            priority,
-                            tags,
-                            deadline,
-                        });
-                        imported += 1;
+                    if self.data.tasks.iter().any(|t| t.name.trim().to_lowercase() == name.to_lowercase() && t.project == project) {
+                        continue;
                     }
-                    self.save();
-                    self.export_message = Some(format!("{} importadas", imported));
-                    self.export_message_time = Some(Instant::now());
+
+                    let completed = row.get(3).map(|c| c.to_string() == "Si").unwrap_or(false);
+                    let priority_str = row.get(4).map(|c| c.to_string()).unwrap_or_default();
+                    let priority_trim = priority_str.trim();
+                    let priority = if priority_trim == crate::i18n::t(&lang, "high") { Priority::Alta } else if priority_trim == crate::i18n::t(&lang, "low") { Priority::Baja } else { Priority::Media };
+                    let tags = row.get(5).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+                    let deadline = row.get(6).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+
+                    self.data.tasks.push(Task {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name,
+                        description,
+                        project,
+                        completed,
+                        priority,
+                        tags,
+                        deadline,
+                    });
+                    imported += 1;
                 }
+                self.save();
+                self.export_message = Some(format!("{} importadas", imported));
+                self.export_message_time = Some(Instant::now());
             }
         }
     }
 
-    fn export_tasks(&self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Excel Workbook", &["xlsx"])
-            .set_file_name("pendientes_export.xlsx")
-            .save_file() {
-            let mut workbook = rust_xlsxwriter::Workbook::new();
-            if let Ok(worksheet) = workbook.add_worksheet().set_name("Pendientes") {
-                let _ = worksheet.write_string(0, 0, "Nombre");
-                let _ = worksheet.write_string(0, 1, "Descripción");
-                let _ = worksheet.write_string(0, 2, "Proyecto");
-                let _ = worksheet.write_string(0, 3, "Completada");
-                let _ = worksheet.write_string(0, 4, "Prioridad");
-                let _ = worksheet.write_string(0, 5, "Etiquetas");
-                let _ = worksheet.write_string(0, 6, "Fecha Limite");
+    fn export_tasks_to_file(&mut self, path: &std::path::Path) {
+        let lang = self.data.language;
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        if let Ok(worksheet) = workbook.add_worksheet().set_name("Pendientes") {
+            let _ = worksheet.write_string(0, 0, "Nombre");
+            let _ = worksheet.write_string(0, 1, "Descripción");
+            let _ = worksheet.write_string(0, 2, "Proyecto");
+            let _ = worksheet.write_string(0, 3, "Completada");
+            let _ = worksheet.write_string(0, 4, "Prioridad");
+            let _ = worksheet.write_string(0, 5, "Etiquetas");
+            let _ = worksheet.write_string(0, 6, "Fecha Limite");
 
-                for (i, task) in self.data.tasks.iter().enumerate() {
-                    let row = (i + 1) as u32;
-                    let _ = worksheet.write_string(row, 0, &task.name);
-                    let _ = worksheet.write_string(row, 1, &task.description);
-                    
-                    let proj_name = if let Some(pid) = &task.project {
-                        self.data.projects.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    let _ = worksheet.write_string(row, 2, &proj_name);
-                    
-                    let _ = worksheet.write_string(row, 3, if task.completed { "Si" } else { "No" });
-                    let prio_str = match task.priority { Priority::Alta => "Alta", Priority::Media => "Media", Priority::Baja => "Baja" };
-                    let _ = worksheet.write_string(row, 4, prio_str);
-                    let _ = worksheet.write_string(row, 5, &task.tags);
-                    let _ = worksheet.write_string(row, 6, &task.deadline);
-                }
+            for (i, task) in self.data.tasks.iter().enumerate() {
+                let row = (i + 1) as u32;
+                let _ = worksheet.write_string(row, 0, &task.name);
+                let _ = worksheet.write_string(row, 1, &task.description);
                 
-                if workbook.save(&path).is_ok() {
-                    // Update state manually since we are in &self
-                    // For export message, normally needs &mut self, skipped for pure dump
-                }
+                let proj_name = if let Some(pid) = &task.project {
+                    self.data.projects.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let _ = worksheet.write_string(row, 2, &proj_name);
+                
+                let _ = worksheet.write_string(row, 3, if task.completed { "Si" } else { "No" });
+                let prio_str = match task.priority { Priority::Alta => crate::i18n::t(&lang, "high"), Priority::Media => crate::i18n::t(&lang, "medium"), Priority::Baja => crate::i18n::t(&lang, "low") };
+                let _ = worksheet.write_string(row, 4, prio_str);
+                let _ = worksheet.write_string(row, 5, &task.tags);
+                let _ = worksheet.write_string(row, 6, &task.deadline);
+            }
+            
+            if workbook.save(path).is_ok() {
+                self.export_message = Some(format!("Exportado a {:?}", path.display()));
+                self.export_message_time = Some(Instant::now());
+            } else {
+                self.export_message = Some("Error al exportar".to_string());
+                self.export_message_time = Some(Instant::now());
             }
         }
     }
 
     pub fn ui_dashboard(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
-        ui.heading("Dashboard - Horas por Proyecto");
+        let lang = self.data.language;
+        ui.heading(crate::i18n::t(&lang, "dashboard_hours_project"));
         ui.add_space(20.0);
 
         let mut bars = Vec::new();
@@ -713,16 +718,17 @@ impl TimeTrackerState {
     }
 
     pub fn ui_settings(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
-        ui.heading("Configuración");
+        let lang = self.data.language;
+        ui.heading(crate::i18n::t(&lang, "settings"));
         ui.add_space(20.0);
 
         let mut changed = false;
         ui.horizontal(|ui| {
-            ui.label("Minutos Trabajo Profundo:");
+            ui.label(crate::i18n::t(&lang, "deep_work_minutes"));
             if ui.add(egui::Slider::new(&mut self.data.work_duration_mins, 1..=120)).changed() { changed = true; }
         });
         ui.horizontal(|ui| {
-            ui.label("Minutos Descanso:");
+            ui.label(crate::i18n::t(&lang, "rest_minutes"));
             if ui.add(egui::Slider::new(&mut self.data.rest_duration_mins, 1..=60)).changed() { changed = true; }
         });
         
@@ -773,5 +779,49 @@ mod tests {
         };
         // 100 + 50 + 0 + 0 = 150
         assert_eq!(proj.total_duration(), 150);
+    }
+
+    #[test]
+    fn test_export_import_tasks() {
+        let temp_dir = std::env::temp_dir();
+        let export_path = temp_dir.join("test_export.xlsx");
+
+        // Clean up before test
+        let _ = std::fs::remove_file(&export_path);
+
+        let mut state = TimeTrackerState::load();
+        state.data.tasks.clear(); // Ensure empty
+        
+        // Add a test task
+        state.data.tasks.push(Task {
+            id: "test-id-1".into(),
+            name: "Test Task".into(),
+            description: "Description".into(),
+            project: None,
+            completed: false,
+            priority: Priority::Alta,
+            tags: "tag1".into(),
+            deadline: "2023-12-31".into(),
+        });
+
+        // Export tasks
+        state.export_tasks_to_file(&export_path);
+        assert!(export_path.exists());
+
+        // Create a new state and import the tasks
+        let mut new_state = TimeTrackerState::load();
+        new_state.data.tasks.clear(); // Ensure empty
+        
+        new_state.import_tasks_from_file(&export_path);
+        
+        assert_eq!(new_state.data.tasks.len(), 1);
+        let imported = &new_state.data.tasks[0];
+        assert_eq!(imported.name, "Test Task");
+        assert_eq!(imported.description, "Description");
+        assert_eq!(imported.completed, false);
+        // Only checking name/desc to confirm file IO and row parsing works
+        
+        // Cleanup after test
+        let _ = std::fs::remove_file(&export_path);
     }
 }
