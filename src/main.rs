@@ -41,9 +41,7 @@ struct AppState {
     ultradian_state: TimerState,
     ultradian_start: Instant,
     ultradian_remaining: Duration,
-    tracker: TimeTrackerState,
-    last_mouse_pos: Option<eframe::egui::Pos2>,
-    last_mouse_time: Instant,
+    tracker: tracker::TimeTrackerState,
 }
 
 impl AppState {
@@ -59,8 +57,6 @@ impl AppState {
             ultradian_start: Instant::now(),
             ultradian_remaining: work_duration,
             tracker,
-            last_mouse_pos: None,
-            last_mouse_time: Instant::now(),
         }
     }
 
@@ -71,12 +67,13 @@ impl AppState {
         let _ = Command::new("paplay").arg("/usr/share/sounds/freedesktop/stereo/complete.oga").spawn();
     }
 
-    fn ultradian_toggle_pause(&mut self) {
+    fn ultradian_toggle_pause(&mut self, ctx: &egui::Context) {
         match self.ultradian_state {
             TimerState::Idle => {
                 self.ultradian_state = TimerState::Work;
                 self.ultradian_start = Instant::now();
                 self.ultradian_remaining = self.work_dur();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             TimerState::Work => {
                 self.ultradian_state = TimerState::PausedWork;
@@ -89,6 +86,7 @@ impl AppState {
             TimerState::PausedWork => {
                 self.ultradian_state = TimerState::Work;
                 self.ultradian_start = Instant::now() - (self.work_dur() - self.ultradian_remaining);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             TimerState::PausedRest => {
                 self.ultradian_state = TimerState::Rest;
@@ -114,18 +112,6 @@ impl AppState {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
-        if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
-            if Some(pos) != self.last_mouse_pos {
-                self.last_mouse_pos = Some(pos);
-                self.last_mouse_time = Instant::now();
-            }
-        }
-        if self.last_mouse_time.elapsed().as_secs() > 300 {
-            if self.ultradian_state == TimerState::Work { self.ultradian_state = TimerState::PausedWork; }
-            else if self.ultradian_state == TimerState::Rest { self.ultradian_state = TimerState::PausedRest; }
-            if self.tracker.is_tracking { self.tracker.toggle_tracking(); }
-        }
-
         if self.ultradian_state == TimerState::Work || self.ultradian_state == TimerState::Rest {
             let elapsed = self.ultradian_start.elapsed();
             let total = match self.ultradian_state {
@@ -213,7 +199,7 @@ impl AppState {
     fn ui_ultradian(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, is_rest: bool) {
         let lang = self.tracker.data.language;
         if ctx.input(|i| i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Enter)) {
-            self.ultradian_toggle_pause();
+            self.ultradian_toggle_pause(ctx);
         }
         if ctx.input(|i| i.key_pressed(egui::Key::R)) {
             self.ultradian_restart_phase();

@@ -103,7 +103,7 @@ impl TimeTrackerState {
         self.save();
     }
 
-    pub fn toggle_tracking(&mut self) {
+    pub fn toggle_tracking(&mut self, ctx: &egui::Context) {
         if self.is_tracking {
             if let Some(start) = self.current_session_start {
                 self.current_session_elapsed += start.elapsed().as_secs();
@@ -113,6 +113,7 @@ impl TimeTrackerState {
         } else {
             self.current_session_start = Some(Instant::now());
             self.is_tracking = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
     }
 
@@ -197,7 +198,7 @@ impl TimeTrackerState {
         }
     }
 
-    pub fn ui(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let lang = self.data.language;
         ui.add_space(10.0);
 
@@ -286,7 +287,7 @@ impl TimeTrackerState {
                         ui.horizontal(|ui| {
                             let btn_text = if self.is_tracking { crate::i18n::t(&lang, "pause") } else { crate::i18n::t(&lang, "start") };
                             if ui.button(btn_text).clicked() {
-                                self.toggle_tracking();
+                                self.toggle_tracking(ctx);
                             }
 
                             if current_secs > 0 || self.active_parent_session_id.is_some() {
