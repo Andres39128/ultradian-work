@@ -9,7 +9,7 @@ Fecha: 2026-08-23 · Reemplaza a la auditoria de 2026-08-18 (que a su vez reempl
 | Arquitectura | 7/10 | Separacion por modulos clara (main/tracker/models/i18n/screen), maquina de estados explicita para el timer, persistencia con `schema_version`. Debe principal: `tracker.rs` es un objeto-dios (UI + logica + persistencia + tests en 1168 lineas); la logica no es testeable sin egui. |
 | Redundancia | 5/10 | 7 keys i18n muertas, wrappers `#[allow(dead_code)]` en `screen.rs`, `has_xset` sin uso productivo, patron sentinel `"handled"`, `#[allow(dead_code)]` sobre el struct completo que enmascara uso real. |
 | Duplicidad | 5/10 | Bloque `export_message` x2 identico, expresion `total_secs` x2 (aunque `Project::total_duration` existe), tripleto `Fullscreen(false)+WindowLevel(Normal)` x3, dos windows de confirmacion casi identicas (proyecto/sesion). |
-| Coherencia | 6/10 | i18n aplicada en ~90% del UI pero quedan 12 strings hardcodeados (Excel, errores, "Ninguno"); valores canonicos de Excel en espanol; `Default` (90/15 min) vs `serde(default)` (0) con semantica contradictoria; manejo de errores consistente (`eprintln!`, degradacion elegante). |
+| Coherencia | 6/10 | i18n completada el 2026-08-23 (antes quedaban 12 strings hardcodeados: Excel, errores, "Ninguno" — ver C1); valores canonicos de Excel en espanol (intencional, ver C1); `Default` (90/15 min) vs `serde(default)` (0) con semantica contradictoria; manejo de errores consistente (`eprintln!`, degradacion elegante). |
 | Verbosidad | 6/10 | 10 clones de String por tarea por frame en el loop de tareas, `load()` con inicializacion explicita de 24 campos (acotable), match i18n de ~180 brazos (inherente al enfoque elegido). |
 | Tamano | 7/10 | 2333 lineas para el feature set es razonable; el desbalance es `tracker.rs` (50% del codigo). Binario release 20 MB (tipico de eframe/wgpu; `strip` podria recortarlo). |
 | Optimizacion | 5/10 | Scan O(n²) por frame en tareas, clone profundo de todo el data en Dashboard por frame, sin repaint periodico mientras se trackea (display se congela), save atomico OK, repaint a 1s OK. |
@@ -93,8 +93,8 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | B4 | Doble trigger de hotkeys | **ARREGLADO** | `has_focus` guard en `main.rs:340-351` |
 | B5 | Ultradian siempre al 1er proyecto | **ARRELLADO** | Usa `active_project_id` primero (`main.rs:173-177`). Quedan: nombre "Ultradian" hardcodeado (`:181`) y sesion descartada en silencio si el proyecto desaparece (`:187`, `if let` sin else) |
 | B6 | Scan O(n²) en tareas | **ABIERTO** | `tracker.rs:601-602` (`find` por frame por id) + 2do `find` en `:649-650`; agravado por 10 clones de String por tarea por frame (`:603-610`) |
-| C1 | Strings hardcodeados ES | **ABIERTO** | "Fecha (Unix)" (`tracker.rs:213`), "Exportado a"/"Error al exportar" (`:225,228,808,811`), "Ninguno" x2 (`:543,545`), "Error al abrir archivo" (`:708`), "Hoja 'Pendientes' no encontrada" (`:713`), "{} importadas" (`:773`), headers Excel ES (`:780-786`), titulo chart "Proyectos" (`:857`), "Ultradian" (`main.rs:181`) |
-| C2 | 7 keys i18n muertas | **ABIERTO** | Verificado hoy con grep: `project`, `select_project`, `search_placeholder`, `screen_dim_available`, `screen_lock_available`, `ultradian_rest_title`, `ultradian_rest_desc` — 0 usos fuera de i18n.rs |
+| C1 | Strings hardcodeados ES | **ARREGLADO** | 12 strings → 16 keys i18n (`date_unix`, `exported_to`, `error_export`, `error_open_file`, `sheet_not_found`, `imported_tasks`, 7x `excel_header_*`, `none`, `chart_projects`, `ultradian_project`). Quedan canónicos (no i18n) el nombre de sheet "Pendientes" y los valores "Alta/Media/Baja": el import los busca por literal, localizarlos rompería el roundtrip entre idiomas |
+| C2 | 7 keys i18n muertas | **ARREGLADO** | Borradas `project`, `select_project`, `search_placeholder`, `screen_dim_available`, `screen_lock_available`, `ultradian_rest_title`, `ultradian_rest_desc`; el test de keys se amplió a cubrir las 16 nuevas |
 | C3 | Key desconocida → "" | **ABIERTO** | `i18n.rs:183` (`_ => ""`) sin log en debug |
 | C4 | Expresion total_secs x3 | **ABIERTO** | Duplicada en `tracker.rs:216-217` y `:422-423` aunque `Project::total_duration` existe (`models.rs:93-101`) |
 | C5 | Bloque export_message x2 | **ABIERTO** | Identico en `tracker.rs:321-328` y `:523-530` |
@@ -109,7 +109,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | C14 | README con placeholder | **ABIERTO** | `README.md:22` sigue con `tu-usuario`; tampoco documenta dim/lock ni shortcuts |
 | C15 | install.sh sin prerequisitos | **ARREGLADO** | `check_prerequisites` verifica cargo/rustc + avisa de deps opcionales (`install.sh:26-49`) |
 
-**Resumen: 12 arreglados, 3 parciales, 10 abiertos** (de 25).
+**Resumen: 14 arreglados, 3 parciales, 8 abiertos** (de 25).
 
 ## Estado de hallazgos de la auditoria 2026-05-11 (PROD)
 
@@ -119,7 +119,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | PROD-002 (tracker monolitico) | **REGRESADO**: crecio de 1112 a 1168 lineas; la extraccion de screen.rs no llego a tracker |
 | PROD-003 (unwrap_or_default silencioso) | PARCIAL (distingue read/parse, loguea; sigue sin feedback en UI) |
 | PROD-004 (scripts muertos) | ARREGLADO |
-| PROD-005 (strings hardcodeados) | PARCIAL (ver C1) |
+| PROD-005 (strings hardcodeados) | ARREGLADO (ver C1, resuelto 2026-08-23) |
 | PROD-006 (schema version) | PARCIAL (campo + tests; sin migracion) |
 | PROD-007 (pocos tests) | MEJORADO: 18 tests, todos seguros de correr; quedan 2 falsos (C9) |
 | PROD-008 (.gitignore) | ARREGLADO |
@@ -165,7 +165,7 @@ Binario release: 20 MB (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~
 **Corto plazo (riesgo de datos / calidad):**
 - **C4/C5/C6** — 3 deduplicaciones con helper (una tarde)
 - ~~**B1**~~ — persistir sesion en curso — **resuelto** (ver tabla de estado)
-- **C1 + C2** — i18n de los 12 strings restantes y borrar 7 keys muertas (mismo commit)
+- ~~**C1 + C2**~~ — i18n de los 12 strings restantes y borrar 7 keys muertas — **resuelto** en `576ae29` (mismo commit)
 - **N5/N6/N7/N8/N9** — paquete de fixes pequenos
 - **C9** — reescribir los 2 tests falsos para llamar a `create_task()`/`add_project()` reales (inyectando el data path, que ya existe)
 - Actualizar `eframe`+`egui_plot` a 0.36/0.37 en commit dedicado; `cargo audit`
