@@ -89,6 +89,7 @@ impl AppState {
 
     fn work_dur(&self) -> Duration { Duration::from_secs(self.tracker.data.work_duration_mins * 60) }
     fn rest_dur(&self) -> Duration { Duration::from_secs(self.tracker.data.rest_duration_mins * 60) }
+    fn is_rest(&self) -> bool { self.ultradian_state == TimerState::Rest || self.ultradian_state == TimerState::PausedRest }
     fn notify(&self, title: &str, body: &str) {
         let _ = Notification::new().summary(title).body(body).show();
         let _ = Command::new("paplay").arg("/usr/share/sounds/freedesktop/stereo/complete.oga").spawn();
@@ -296,10 +297,8 @@ impl AppState {
 }
 
 impl eframe::App for AppState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.tick(ctx);
-
-        let is_rest = self.ultradian_state == TimerState::Rest || self.ultradian_state == TimerState::PausedRest;
 
         if self.ultradian_state == TimerState::Idle {
             self.ultradian_remaining = self.work_dur();
@@ -308,18 +307,24 @@ impl eframe::App for AppState {
         if self.tracker.is_tracking {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
-        if is_rest {
+        if self.is_rest() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
+        let is_rest = self.is_rest();
 
         let frame_style = if is_rest {
             egui::Frame::default().fill(egui::Color32::BLACK)
         } else {
-            egui::Frame::default().fill(ctx.style().visuals.panel_fill).inner_margin(16.0)
+            egui::Frame::default().fill(ctx.style_of(ctx.theme()).visuals.panel_fill).inner_margin(16.0)
         };
 
         if !is_rest {
-            egui::TopBottomPanel::top("top_panel").frame(egui::Frame::default().fill(egui::Color32::from_rgb(25, 30, 35)).inner_margin(8.0)).show(ctx, |ui| {
+            egui::Panel::top("top_panel").frame(egui::Frame::default().fill(egui::Color32::from_rgb(25, 30, 35)).inner_margin(8.0)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let lang = self.tracker.data.language;
                     ui.selectable_value(&mut self.view, AppView::Ultradian, crate::i18n::t(&lang, "tab_ultradian"));
@@ -339,15 +344,15 @@ impl eframe::App for AppState {
             });
         }
 
-        egui::CentralPanel::default().frame(frame_style).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(frame_style).show(ui, |ui| {
             match self.view {
-                AppView::Ultradian => self.ui_ultradian(ctx, ui, is_rest),
-                AppView::Tracker => self.tracker.ui(ctx, ui),
+                AppView::Ultradian => self.ui_ultradian(&ctx, ui, is_rest),
+                AppView::Tracker => self.tracker.ui(&ctx, ui),
                 AppView::Dashboard => {
-                    self.tracker.ui_dashboard(ctx, ui, &self.tracker.data.projects);
+                    self.tracker.ui_dashboard(&ctx, ui, &self.tracker.data.projects);
                 }
                 AppView::Settings => {
-                    if self.tracker.ui_settings(ctx, ui, &self.screen_tools, screen::is_wayland()) {
+                    if self.tracker.ui_settings(&ctx, ui, &self.screen_tools, screen::is_wayland()) {
                         self.ultradian_state = TimerState::Idle;
                         self.ultradian_remaining = self.work_dur();
                         self.ultradian_start = Instant::now();
@@ -357,11 +362,11 @@ impl eframe::App for AppState {
                         if self.tracker.data.screen_lock_during_rest {
                             crate::screen::unlock_screen();
                         }
-                        exit_rest_viewport(ctx);
+                        exit_rest_viewport(&ctx);
                     }
                 }
                 AppView::Tasks => {
-                    if self.tracker.ui_tasks(ctx, ui) {
+                    if self.tracker.ui_tasks(&ctx, ui) {
                         self.view = AppView::Tracker;
                     }
                 }
