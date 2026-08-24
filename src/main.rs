@@ -93,8 +93,12 @@ impl AppState {
     fn rest_dur(&self) -> Duration { Duration::from_secs(self.tracker.data.rest_duration_mins * 60) }
     fn is_rest(&self) -> bool { self.ultradian_state == TimerState::Rest || self.ultradian_state == TimerState::PausedRest }
     fn notify(&self, title: &str, body: &str) {
-        let _ = Notification::new().summary(title).body(body).show();
-        let _ = Command::new("paplay").arg("/usr/share/sounds/freedesktop/stereo/complete.oga").spawn();
+        if let Err(e) = Notification::new().summary(title).body(body).show() {
+            tracing::warn!(error = %e, "failed to show desktop notification");
+        }
+        if let Err(e) = Command::new("paplay").arg("/usr/share/sounds/freedesktop/stereo/complete.oga").spawn() {
+            tracing::debug!(error = %e, "failed to play notification sound");
+        }
     }
 
     fn today_total_secs(&self) -> u64 {
@@ -544,7 +548,19 @@ impl AppState {
     }
 }
 
+/// Initializes structured logging. Log level is controlled by `RUST_LOG`
+/// (e.g. `RUST_LOG=debug ultradian-work`); defaults to `warn` so a GUI app
+/// stays quiet unless save or screen errors need attention.
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "warn".into());
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .init();
+}
+
 fn main() -> eframe::Result<()> {
+    init_logging();
     crate::screen::install_signal_handlers();
 
     let args = Args::parse();

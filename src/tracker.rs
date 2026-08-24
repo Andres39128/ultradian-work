@@ -44,13 +44,18 @@ pub struct TimeTrackerState {
 }
 
 impl TimeTrackerState {
+    /// Project data directory (e.g. `~/.local/share/com.DevPersonal.UltradianTimer`).
+    /// Shared by the tracker data file and the brightness save file (screen.rs).
+    pub fn data_dir() -> Option<PathBuf> {
+        directories::ProjectDirs::from("com", "DevPersonal", "UltradianTimer").map(|d| d.data_dir().to_path_buf())
+    }
+
     fn get_data_path() -> PathBuf {
         if let Ok(path) = std::env::var("ULTRADIANT_DATA_PATH") {
             return PathBuf::from(path);
         }
-        if let Some(proj_dirs) = directories::ProjectDirs::from("com", "DevPersonal", "UltradianTimer") {
-            let dir = proj_dirs.data_dir();
-            fs::create_dir_all(dir).unwrap_or_default();
+        if let Some(dir) = Self::data_dir() {
+            fs::create_dir_all(&dir).unwrap_or_default();
             dir.join("tracker_data.json")
         } else {
             PathBuf::from("tracker_data.json")
@@ -65,13 +70,13 @@ impl TimeTrackerState {
                     match serde_json::from_str(&content) {
                         Ok(data) => data,
                         Err(e) => {
-                            eprintln!("Error parseando datos del tracker (archivo preservado): {}", e);
+                            tracing::error!(path = %path.display(), error = %e, "failed to parse tracker data file, file preserved, starting with defaults");
                             TrackerData::default()
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error leyendo archivo de datos: {}", e);
+                    tracing::error!(path = %path.display(), error = %e, "failed to read tracker data file, starting with defaults");
                     TrackerData::default()
                 }
             }
@@ -119,17 +124,19 @@ impl TimeTrackerState {
                 match fs::write(&tmp_path, &content) {
                     Ok(()) => {
                         if let Err(e) = fs::rename(&tmp_path, &path) {
-                            eprintln!("Error renombrando archivo temporal: {}", e);
+                            tracing::error!(path = %path.display(), error = %e, "failed to rename temp file to data file, data not saved");
                             let _ = fs::remove_file(&tmp_path);
+                        } else {
+                            tracing::debug!(path = %path.display(), "saved tracker data");
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error escribiendo archivo temporal: {}", e);
+                        tracing::error!(path = %path.display(), error = %e, "failed to write temp file, data not saved");
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Error serializando datos del tracker: {}", e);
+                tracing::error!(error = %e, "failed to serialize tracker data, data not saved");
             }
         }
     }
@@ -814,6 +821,25 @@ mod tests {
         assert_eq!(loaded.schema_version, 1);
 
         let _ = std::fs::remove_file(&target);
+    }
+
+    #[test]
+    fn test_save_failure_does_not_panic() {
+        let _guard = DATA_PATH_LOCK.lock().unwrap();
+        // Point the data path inside a regular file so the write must fail;
+        // save() must log the error and return, never panic.
+        let blocker = std::env::temp_dir().join(format!("ultradian-save-test-blocker-{}", std::process::id()));
+        std::fs::write(&blocker, "x").expect("create blocker file");
+        let data_path = blocker.join("tracker_data.json");
+        unsafe {
+            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
+        }
+        let mut state = TimeTrackerState::load();
+        state.save();
+        unsafe {
+            std::env::remove_var("ULTRADIANT_DATA_PATH");
+        }
+        let _ = std::fs::remove_file(&blocker);
     }
 
     #[test]

@@ -217,7 +217,7 @@ pub fn t(lang: &Language, key: &str) -> &'static str {
         },
         None => {
             #[cfg(debug_assertions)]
-            eprintln!("[i18n] unknown key: {key}");
+            tracing::warn!(%key, "unknown i18n key");
             ""
         }
     }
