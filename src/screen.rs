@@ -2,7 +2,33 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-const BRIGHTNESS_SAVE_PATH: &str = "/tmp/ultradian-work-brightness";
+/// Where the pre-rest brightness level is saved, next to `tracker_data.json`
+/// (e.g. `~/.local/share/com.DevPersonal.UltradianTimer/brightness`).
+pub fn brightness_save_path() -> PathBuf {
+    crate::tracker::TimeTrackerState::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("brightness")
+}
+
+/// Parses the first brightness level from `brightnessctl g` output.
+///
+/// With multiple monitors brightnessctl prints one line per device
+/// (e.g. `74% [backlight]` then `45% [led]`); the level is taken from the
+/// first non-empty line, stripping the device-class annotation. `brightnessctl s`
+/// without `-d` targets the same default device.
+pub(crate) fn parse_brightness_output(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty())
+        .map(|line| {
+            line.split_once('[')
+                .map(|(level, _)| level.trim())
+                .unwrap_or(line)
+                .to_string()
+        })
+        .filter(|level| !level.is_empty())
+}
 
 #[allow(dead_code)]
 pub struct ScreenTools {
@@ -76,15 +102,15 @@ pub fn install_signal_handlers() {
         unlock_screen();
         std::process::exit(0);
     }).unwrap_or_else(|e| {
-        eprintln!("[ultradian-work] Failed to install Ctrl+C handler: {}", e);
+        tracing::error!(error = %e, "failed to install Ctrl+C handler");
     });
 }
 
 /// Dim screen during rest.
 ///
 /// Attempts to reduce brightness via `brightnessctl`, saves the original
-/// level to a temp file. Falls back to `xset dpms force off` if
-/// brightnessctl is not available. Gracefully degrades with eprintln.
+/// level to the project data dir. Falls back to `xset dpms force off` if
+/// brightnessctl is not available. Gracefully degrades with tracing.
 pub fn dim_screen() {
     if cfg!(test) {
         return;
@@ -95,20 +121,26 @@ pub fn dim_screen() {
         .output()
         && output.status.success()
     {
-        let current = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let current = String::from_utf8_lossy(&output.stdout);
+        let save_path = brightness_save_path();
         // Idempotent: if a level is already saved we are mid-rest; re-reading
         // would store the dimmed level as the "original" and break the restore.
-        if !current.is_empty() && !PathBuf::from(BRIGHTNESS_SAVE_PATH).exists() {
-            let _ = fs::write(BRIGHTNESS_SAVE_PATH, &current);
+        if !save_path.exists()
+            && let Some(level) = parse_brightness_output(&current)
+            && let Err(e) = save_brightness_to(&save_path, &level) {
+            tracing::error!(error = %e, "failed to save current brightness level, restore after rest will be skipped");
         }
         // Dim to 5%.
-        let _ = Command::new("brightnessctl")
+        if let Err(e) = Command::new("brightnessctl")
             .arg("s")
             .arg("5%")
             .arg("-n")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .status();
+            .status()
+        {
+            tracing::warn!(error = %e, "failed to dim screen via brightnessctl");
+        }
         return;
     }
 
@@ -123,30 +155,32 @@ pub fn dim_screen() {
         return;
     }
 
-    eprintln!("[ultradian-work] screen::dim_screen: neither brightnessctl nor xset is available, screen dimming skipped");
+    tracing::warn!("neither brightnessctl nor xset is available, screen dimming skipped");
 }
 
 /// Restore screen brightness to the saved level.
 ///
 /// If a saved brightness file exists, restores via `brightnessctl`.
-/// Otherwise tries `xset dpms force on`. Gracefully degrades with eprintln.
+/// Otherwise tries `xset dpms force on`. Gracefully degrades with tracing.
 pub fn restore_screen() {
     if cfg!(test) {
         return;
     }
-    let save_path = PathBuf::from(BRIGHTNESS_SAVE_PATH);
+    let save_path = brightness_save_path();
 
     if save_path.exists() {
         if let Ok(level) = fs::read_to_string(&save_path) {
             let level = level.trim();
-            if !level.is_empty() {
-                let _ = Command::new("brightnessctl")
+            if !level.is_empty()
+                && let Err(e) = Command::new("brightnessctl")
                     .arg("s")
                     .arg(level)
                     .arg("-n")
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
-                    .status();
+                    .status()
+            {
+                tracing::warn!(error = %e, "failed to restore brightness via brightnessctl");
             }
         }
         let _ = fs::remove_file(&save_path);
@@ -164,13 +198,13 @@ pub fn restore_screen() {
         return;
     }
 
-    eprintln!("[ultradian-work] screen::restore_screen: could not restore screen state");
+    tracing::warn!("could not restore screen state");
 }
 
 /// Lock the system session.
 ///
 /// Tries `loginctl lock-session` first, falls back to `xdg-screensaver lock`.
-/// Gracefully degrades with eprintln if neither is available.
+/// Gracefully degrades with tracing if neither is available.
 pub fn lock_screen() {
     if cfg!(test) {
         return;
@@ -191,13 +225,13 @@ pub fn lock_screen() {
         return;
     }
 
-    eprintln!("[ultradian-work] screen::lock_screen: neither loginctl nor xdg-screensaver is available, screen locking skipped");
+    tracing::warn!("neither loginctl nor xdg-screensaver is available, screen locking skipped");
 }
 
 /// Unlock the system session.
 ///
 /// Tries `loginctl unlock-session` first, falls back to `xdg-screensaver unlock`.
-/// Gracefully degrades with eprintln if neither is available.
+/// Gracefully degrades with tracing if neither is available.
 pub fn unlock_screen() {
     if cfg!(test) {
         return;
@@ -218,19 +252,19 @@ pub fn unlock_screen() {
         return;
     }
 
-    eprintln!("[ultradian-work] screen::unlock_screen: neither loginctl nor xdg-screensaver is available, screen unlocking skipped");
+    tracing::warn!("neither loginctl nor xdg-screensaver is available, screen unlocking skipped");
 }
 
-/// Get the saved brightness value from the temp file, if it exists.
+/// Get the saved brightness value from the data dir, if it exists.
 #[allow(dead_code)]
 pub fn get_saved_brightness() -> Option<String> {
-    get_saved_brightness_from(&PathBuf::from(BRIGHTNESS_SAVE_PATH))
+    get_saved_brightness_from(&brightness_save_path())
 }
 
-/// Persist a brightness level to the temp file so it can be restored later.
+/// Persist a brightness level to the data dir so it can be restored later.
 #[allow(dead_code)]
 pub fn save_brightness(level: &str) {
-    save_brightness_to(&PathBuf::from(BRIGHTNESS_SAVE_PATH), level);
+    let _ = save_brightness_to(&brightness_save_path(), level);
 }
 
 fn get_saved_brightness_from(path: &std::path::Path) -> Option<String> {
@@ -244,10 +278,14 @@ fn get_saved_brightness_from(path: &std::path::Path) -> Option<String> {
     }
 }
 
-fn save_brightness_to(path: &std::path::Path, level: &str) {
-    if !level.is_empty() {
-        let _ = fs::write(path, level);
+fn save_brightness_to(path: &std::path::Path, level: &str) -> std::io::Result<()> {
+    if level.is_empty() {
+        return Ok(());
     }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, level)
 }
 
 #[cfg(test)]
@@ -270,13 +308,13 @@ mod tests {
         let _ = std::fs::remove_file(&temp);
 
         // save + get roundtrip.
-        save_brightness_to(&temp, "100");
+        save_brightness_to(&temp, "100").expect("save should succeed");
         let saved = get_saved_brightness_from(&temp);
         assert_eq!(saved, Some("100".to_string()));
 
         // Saving empty string must not write.
         let _ = std::fs::remove_file(&temp);
-        save_brightness_to(&temp, "");
+        save_brightness_to(&temp, "").expect("empty save should not fail");
         assert!(!temp.exists());
 
         // Clean up.
@@ -306,5 +344,33 @@ mod tests {
     fn test_detect_has_methods() {
         let tools = ScreenTools::detect();
         let _ = tools.has_dim_support();
+    }
+
+    #[test]
+    fn test_parse_brightness_output_single_line() {
+        assert_eq!(parse_brightness_output("74%"), Some("74%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brightness_output_strips_device_annotation() {
+        assert_eq!(parse_brightness_output("74% [unknown]"), Some("74%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brightness_output_multi_monitor_takes_first_line() {
+        let stdout = "74% [backlight]\n45% [led]\n";
+        assert_eq!(parse_brightness_output(stdout), Some("74%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brightness_output_skips_blank_lines() {
+        assert_eq!(parse_brightness_output("\n\n  80% [backlight]\n"), Some("80%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brightness_output_empty() {
+        assert_eq!(parse_brightness_output(""), None);
+        assert_eq!(parse_brightness_output("   \n  \n"), None);
+        assert_eq!(parse_brightness_output("[backlight]\n"), None);
     }
 }
