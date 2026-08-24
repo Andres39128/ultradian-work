@@ -369,7 +369,10 @@ mod tests {
         let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
         let xlsx_path = temp_dir.join(format!("test_import_priority_{}.xlsx", std::process::id()));
-        let data_path = temp_dir.join(format!("test_tracker_data_priority_{}.json", std::process::id()));
+        let data_path = temp_dir.join(format!(
+            "test_tracker_data_priority_{}.json",
+            std::process::id()
+        ));
         unsafe {
             std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
         }

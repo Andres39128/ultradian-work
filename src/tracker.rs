@@ -737,9 +737,7 @@ impl TimeTrackerState {
                     if clicked_delete {
                         to_delete = Some(self.data.tasks[*idx].id.clone());
                     }
-                    if clicked_work
-                        && let Some(proj_id) = self.data.tasks[*idx].project.clone()
-                    {
+                    if clicked_work && let Some(proj_id) = self.data.tasks[*idx].project.clone() {
                         start_task_session = Some((proj_id, self.data.tasks[*idx].name.clone()));
                     }
                 }

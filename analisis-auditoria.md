@@ -42,6 +42,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 - **Evidencia:** el confirm de borrado de **proyecto** usa la key `delete_session_confirm` ("¿Estás seguro de que deseas eliminar esta sesión?"). Copy-paste del bloque de sesiones.
 - **Impacto:** en una operacion destructiva el texto no coincide con lo que se va a borrar.
 - **Remediacion:** key nueva `delete_project_confirm` en i18n (2 lineas).
+- **Resuelto** (2026-08-23): key `delete_project_confirm` (en+es) en `i18n.rs:76-80`, usada en el dialog de borrado de proyecto (`tracker.rs:234`).
 
 ### Medios
 
@@ -49,17 +50,20 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 - **Ubicacion:** `main.rs:309` (`self.tracker.data.projects.clone()`), `tracker.rs:817` (`ui_dashboard(&mut self, ...)`)
 - **Evidencia:** `ui_dashboard` no muta nada (solo lee), pero la firma `&mut self` fuerza clonar todos los proyectos + sesiones **cada frame** en la vista Dashboard.
 - **Remediacion:** cambiar a `ui_dashboard(&self, ...)` y pasar `&self.tracker.data.projects` sin clonar.
+- **Resuelto** (2026-08-23): `ui_dashboard(&self, ...)` (`tracker.rs:763`) recibe `&self.tracker.data.projects` sin clonar (`main.rs:440`).
 
 #### N3 · El timer manual del tracker se congela cuando la app esta quieta
 - **Ubicacion:** `main.rs:264-275` (repaint solo si ultradian esta en Work/Rest o es Rest), `tracker.rs:144-156` (`toggle_tracking` minimiza la ventana)
 - **Evidencia:** con una sesion manual trackeando y el ultradiano Idle/Pausado, no hay `request_repaint_after` periodico: el display HH:MM:SS solo se actualiza con eventos de puntero. Como la app se minimiza al arrancar tracking, al volver el display salta en lugar de avanzar.
 - **Impacto:** UX enganosa (el usuario ve un tiempo "atrás"). Los datos guardados son correctos (se calculan desde `Instant`).
 - **Remediacion:** `ctx.request_repaint_after(1s)` mientras `is_tracking`.
+- **Resuelto** (2026-08-23): `ctx.request_repaint_after(1s)` mientras `tracker.is_tracking` (`main.rs:349-351`).
 
 #### N4 · Reiniciar una fase de Rest activa corrompe el brillo guardado
 - **Ubicacion:** `main.rs:135-143` (`ultradian_restart_phase`, rama Rest llama a `dim_screen()`), `screen.rs:93-101`
 - **Evidencia:** si ya esta a 5%, `dim_screen()` vuelve a leer `brightnessctl g` (5%), guarda "5%" como nivel original y apaga a 5%. Al terminar, `restore_screen()` restaura 5% en vez del 80% real.
 - **Remediacion:** hacer `dim_screen()` idempotente (si existe el archivo de save, no re-leer) o no re-dim en restart si ya esta dimmed.
+- **Resuelto** (2026-08-23): `dim_screen()` idempotente — si el archivo de save ya existe no re-lee el nivel actual, asi el restart de fase preserva el brillo original (`screen.rs:127-134`).
 
 ### Bajos
 
@@ -75,7 +79,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | N12 | i18n | `i18n.rs:25` | "Cero ingresos cognitivos" — "ingresos" = income; "entradas de informacion" seria correcto (key muerta de todos modos) |
 | N13 | tests | `tracker.rs:973-975` | `std::env::set_var` (global de proceso, unsafe) en un test que corre en paralelo con los demas; hoy inofensivo (es el unico que usa el data path) pero fragil si se agregan tests que llamen `load()` |
 
-**Resueltos el 2026-08-23:** N5, N6, N7, N8, N9 (ver "Priorizacion sugerida" para el detalle de cada fix).
+**Resueltos el 2026-08-23:** N1, N2, N3, N4, N5, N6, N7, N8, N9 (ver las secciones Altos/Medios y "Priorizacion sugerida" para el detalle de cada fix).
 
 ---
 
@@ -163,10 +167,10 @@ Binario release: 31 MB con eframe 0.36 + tracing (eframe/wgpu; `RUSTFLAGS="-C st
 ## Priorizacion sugerida
 
 **Rapidos (cada uno < 30 min de trabajo):**
-1. **N1** — key i18n `delete_project_confirm` (1 linea + 2 traducciones)
-2. **N3** — `request_repaint_after` mientras `is_tracking` (2 lineas)
-3. **N4** — `dim_screen()` idempotente (check del archivo de save)
-4. **N2** — `ui_dashboard(&self)` y borrar el clone (3 lineas)
+1. ~~**N1**~~ — key i18n `delete_project_confirm` — **resuelto** el 2026-08-23
+2. ~~**N3**~~ — `request_repaint_after` mientras `is_tracking` — **resuelto** el 2026-08-23
+3. ~~**N4**~~ — `dim_screen()` idempotente — **resuelto** el 2026-08-23
+4. ~~**N2**~~ — `ui_dashboard(&self)` y borrar el clone — **resuelto** el 2026-08-23
 
 **Corto plazo (riesgo de datos / calidad):**
 - ~~**C4/C5/C6**~~ — 3 deduplicaciones con helper — **resuelto** el 2026-08-23 (ver tabla de estado)
