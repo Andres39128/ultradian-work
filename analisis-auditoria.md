@@ -24,8 +24,8 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | Check | Resultado |
 |---|---|
 | `cargo check --all-targets` | OK, sin errores |
-| `cargo test` | **24/24 pasaron en 0.01s** (el test de pantalla ya es seguro gracias a `cfg!(test)`; el test de datos usa `ULTRADIANT_DATA_PATH`) |
-| `cargo clippy --all-targets` | 6 warnings, todos en tests (`bool_assert_comparison` x5: tracker.rs:1005,1139,1140,1145,1146; `field_reassign_with_default` x1: tracker.rs:1013). Produccion limpia |
+| `cargo test` | **30/30 pasaron en 0.01s** (el test de pantalla ya es seguro gracias a `cfg!(test)`; los tests de datos/logica usan `ULTRADIANT_DATA_PATH`; tras el split de PROD-002, 6 tests nuevos corren la logica sin UI) |
+| `cargo clippy --all-targets` | 6 warnings, todos en tests (`bool_assert_comparison` x5: task_logic.rs:223, tracker.rs:789,790,795,796; `field_reassign_with_default` x1: tracker.rs:716). Produccion limpia |
 | Binario release | 29 MB (eframe 0.36, unstripped) |
 | Duplicados en dep tree | Una sola copia de `egui 0.36.1` (eframe 0.36.1 + egui_plot 0.37.0 compatibles, verificado en `e533b4b`) |
 
@@ -97,12 +97,12 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | B6 | Scan O(n²) en tareas | **ABIERTO** | `tracker.rs:601-602` (`find` por frame por id) + 2do `find` en `:649-650`; agravado por 10 clones de String por tarea por frame (`:603-610`) |
 | C1 | Strings hardcodeados ES | **ARREGLADO** | 12 strings → 16 keys i18n (`date_unix`, `exported_to`, `error_export`, `error_open_file`, `sheet_not_found`, `imported_tasks`, 7x `excel_header_*`, `none`, `chart_projects`, `ultradian_project`). Quedan canónicos (no i18n) el nombre de sheet "Pendientes" y los valores "Alta/Media/Baja": el import los busca por literal, localizarlos rompería el roundtrip entre idiomas |
 | C2 | 7 keys i18n muertas | **ARREGLADO** | Borradas `project`, `select_project`, `search_placeholder`, `screen_dim_available`, `screen_lock_available`, `ultradian_rest_title`, `ultradian_rest_desc`; el test de keys se amplió a cubrir las 16 nuevas |
-| C3 | Key desconocida → "" | **ABIERTO** | `i18n.rs:183` (`_ => ""`) sin log en debug |
+| C3 | Key desconocida → "" | **ARREGLADO** (2026-08-23, junto a PROD-013) | sigue retornando `""` (degradacion elegante) pero loguea `[i18n] unknown key` en builds debug |
 | C4 | Expresion total_secs x3 | **ABIERTO** | Duplicada en `tracker.rs:216-217` y `:422-423` aunque `Project::total_duration` existe (`models.rs:93-101`) |
 | C5 | Bloque export_message x2 | **ABIERTO** | Identico en `tracker.rs:321-328` y `:523-530` |
 | C6 | Tripleto Fullscreen/WindowLevel x3 | **ABIERTO** | `main.rs:158-159`, `:240-241`, `:323-324` → helper `exit_rest_viewport(ctx)` |
 | C7 | Dead code en screen.rs | **PARCIAL** | Wrappers `get_saved_brightness`/`save_brightness` siguen muertos (`screen.rs:224-232`); los tests usan las funciones privadas directamente |
-| C8 | Sentinel "handled" | **ABIERTO** | `tracker.rs:486-490` |
+| C8 | Sentinel "handled" | **ARREGLADO** (2026-08-23, junto a PROD-002: el dance de `session_to_delete` se reemplazo por limpiar `deleting_session_id` directo al confirmar/cancelar) | `tracker.rs:486-490` |
 | C9 | Tests de validacion falsos | **ARREGLADO** | Tests reescritos para llamar a `create_task()`/`add_project()` reales con `ULTRADIANT_DATA_PATH` inyectado; lock de mutex serializa los tests que mutan la env var (race detectado al agregarlos) |
 | C10 | Nombre fijo test_export.xlsx | **ABIERTO** | `tracker.rs:970` (riesgo de colision entre runs) |
 | C11 | Clippy en tests | **ABIERTO** | 6 warnings confirmados hoy (ver arriba) |
@@ -111,14 +111,14 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | C14 | README con placeholder | **ABIERTO** | `README.md:22` sigue con `tu-usuario`; tampoco documenta dim/lock ni shortcuts |
 | C15 | install.sh sin prerequisitos | **ARREGLADO** | `check_prerequisites` verifica cargo/rustc + avisa de deps opcionales (`install.sh:26-49`) |
 
-**Resumen: 14 arreglados, 3 parciales, 8 abiertos** (de 25).
+**Resumen: 16 arreglados, 2 parciales, 9 abiertos** (de 27).
 
 ## Estado de hallazgos de la auditoria 2026-05-11 (PROD)
 
 | ID | Estado |
 |---|---|
 | PROD-001 (JSON atomico) | ARREGLADO (sostiene: `tracker.rs:104-125` temp+rename) |
-| PROD-002 (tracker monolitico) | **REGRESADO**: crecio de 1112 a 1168 lineas; la extraccion de screen.rs no llego a tracker |
+| PROD-002 (tracker monolitico) | **ARREGLADO** (2026-08-23): `session_logic.rs`/`task_logic.rs` con la logica pura (sin egui); `tracker.rs` quedo con estado + persistencia + render; 30 tests (los de logica corren sin UI) |
 | PROD-003 (unwrap_or_default silencioso) | PARCIAL (distingue read/parse, loguea; sigue sin feedback en UI) |
 | PROD-004 (scripts muertos) | ARREGLADO |
 | PROD-005 (strings hardcodeados) | ARREGLADO (ver C1, resuelto 2026-08-23) |
@@ -129,7 +129,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | PROD-010 (sin logging estructurado) | ABIERTO (solo `eprintln!`) |
 | PROD-011 (repaint continuo) | ARREGLADO |
 | PROD-012 (paplay sin validacion) | ABIERTO (`main.rs:75` ruta hardcodeada, error ignorado) |
-| PROD-013 (i18n no escalable) | ABIERTO (match de ~180 brazos; 2 idiomas hoy, no escala a un 3ro) |
+| PROD-013 (i18n no escalable) | **ARREGLADO** (2026-08-23): const `TRANSLATIONS: &[(&str, &str, &str)]` (key, en, es) + `t()` con busqueda lineal; API `t(&Language, &str)` sin cambios, agregar un idioma = ampliar el tuple |
 | PROD-014 (.desktop duplicado) | ARREGLADO |
 
 ## Dependencias (Cargo.toml / Cargo.lock)
@@ -150,10 +150,12 @@ Actualizado 2026-08-23: `eframe` 0.33.3→**0.36.1** + `egui_plot` 0.34.1→**0.
 
 | Archivo | Lineas | % | Nota |
 |---|---|---|---|
-| `src/tracker.rs` | 1168 | 50% | ~920 de produccion (UI+logica+persistence) + 245 de tests. El objeto-dios del repo |
+| `src/tracker.rs` | 836 | 29% | Estado + persistencia + solo render (UI); ~600 de produccion + 235 de tests |
+| `src/session_logic.rs` | 372 | 13% | Logica pura de sesion/proyecto (sin egui) + tests |
+| `src/task_logic.rs` | 386 | 13% | Logica pura de tareas/import/export (sin egui) + tests |
 | `src/main.rs` | 523 | 22% | AppState + eframe App + UI ultradiana |
 | `src/screen.rs` | 308 | 13% | Bien aislado; wrappers muertos (C7) |
-| `src/i18n.rs` | 213 | 9% | ~180 brazos de match; 7 muertas |
+| `src/i18n.rs` | 185 | 6% | Const tabla (key, en, es) + `t()` lineal; 3 tests (no-empty, keys unicas, unknown key) |
 | `src/models.rs` | 121 | 5% | Limpio, con metodos de dominio (`total_duration`, `today_duration_secs`) |
 
 Binario release: 29 MB con eframe 0.36 (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~20-30%).
@@ -175,8 +177,8 @@ Binario release: 29 MB con eframe 0.36 (eframe/wgpu; `RUSTFLAGS="-C strip=symbol
 - ~~Actualizar `eframe`+`egui_plot` a 0.36/0.37 en commit dedicado; `cargo audit`~~ — **resuelto** en `e533b4b` (migracion `update`→`logic`/`ui` + `Panel` + `style_of`; `cargo audit`: 0 vulnerabilidades, 1 warning transitiva)
 
 **Mediano plazo (deuda estructural):**
-- **PROD-002** — partir `tracker.rs`: extraer logica de sesion/tareas a `session_logic.rs`/`task_logic.rs` (puras, sin egui) y dejar solo render en `tracker.rs`; habilita testear logica sin UI
-- **PROD-013** — i18n con tablas `&'static [(Key, &str, &str)]` o const arrays en lugar de match gigante
+- ~~**PROD-002**~~ — partir `tracker.rs`: extraer logica de sesion/tareas a `session_logic.rs`/`task_logic.rs` (puras, sin egui) y dejar solo render en `tracker.rs`; habilita testear logica sin UI — **resuelto** el 2026-08-23 (30 tests; la persistencia `load`/`save` quedo en `tracker.rs` junto al estado; como efecto colateral se cerro C8: el sentinel `"handled"` desaparecio)
+- ~~**PROD-013**~~ — i18n con const arrays en lugar de match gigante — **resuelto** el 2026-08-23: `TRANSLATIONS: &[(&str, &str, &str)]` (key, en, es); `t()` busca linealmente y mantiene la API; agregar idioma = ampliar el tuple; efecto colateral cerro C3 (debug log de key desconocida)
 - **PROD-010** — logging con `tracing` (hoy `eprintln!`), especialmente errores de save
 - **C12/C13** — brightness en data dir del proyecto + parse por linea de `brightnessctl g`
 - **C14** — README: URL real + seccion de shortcuts/dim/lock
