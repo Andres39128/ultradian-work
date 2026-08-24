@@ -803,10 +803,11 @@ impl TimeTrackerState {
 
             let completed_str = row.get(3).map(|c| c.to_string().trim().to_lowercase()).unwrap_or_default();
             let completed = matches!(completed_str.as_str(), "true" | "si" | "1" | "yes");
-            let priority_str = row.get(4).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+            let priority_str = row.get(4).map(|c| c.to_string().trim().to_lowercase()).unwrap_or_default();
             let priority = match priority_str.as_str() {
-                "Alta" | "high" => Priority::Alta,
-                "Baja" | "low" => Priority::Baja,
+                "alta" | "high" => Priority::Alta,
+                "media" | "medium" => Priority::Media,
+                "baja" | "low" => Priority::Baja,
                 _ => Priority::Media,
             };
             let tags = row.get(5).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
@@ -1064,6 +1065,45 @@ mod tests {
     }
 
     #[test]
+    fn test_import_priority_is_case_insensitive() {
+        let temp_dir = std::env::temp_dir();
+        let xlsx_path = temp_dir.join("test_import_priority.xlsx");
+        let data_path = temp_dir.join("test_tracker_data_priority.json");
+        unsafe {
+            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
+        }
+        let _ = std::fs::remove_file(&xlsx_path);
+        let _ = std::fs::remove_file(&data_path);
+
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        let worksheet = workbook.add_worksheet().set_name("Pendientes").expect("create Pendientes worksheet");
+        for (i, header) in ["Nombre", "Descripcion", "Proyecto", "Completado", "Prioridad", "Tags", "Fecha limite"].into_iter().enumerate() {
+            let _ = worksheet.write_string(0, i as u16, header);
+        }
+        for (r, (name, priority)) in [("T Alta", "High"), ("T Media", "medium"), ("T Baja", "Baja"), ("T Typo", "Urgente")].into_iter().enumerate() {
+            let row = (r + 1) as u32;
+            let _ = worksheet.write_string(row, 0, name);
+            let _ = worksheet.write_string(row, 3, "false");
+            let _ = worksheet.write_string(row, 4, priority);
+        }
+        assert!(workbook.save(&xlsx_path).is_ok());
+
+        let mut state = TimeTrackerState::load();
+        state.data.tasks.clear();
+        state.import_tasks_from_file(&xlsx_path);
+
+        assert_eq!(state.data.tasks.len(), 4);
+        let priority_of = |name: &str| state.data.tasks.iter().find(|t| t.name == name).unwrap().priority.clone();
+        assert_eq!(priority_of("T Alta"), Priority::Alta);
+        assert_eq!(priority_of("T Media"), Priority::Media);
+        assert_eq!(priority_of("T Baja"), Priority::Baja);
+        assert_eq!(priority_of("T Typo"), Priority::Media);
+
+        let _ = std::fs::remove_file(&xlsx_path);
+        let _ = std::fs::remove_file(&data_path);
+    }
+
+    #[test]
     fn test_save_load_roundtrip() {
         let mut data = TrackerData::default();
         data.schema_version = 1;
@@ -1120,10 +1160,18 @@ mod tests {
         let json = r#"{"language": "Es"}"#;
         let data: TrackerData = serde_json::from_str(json).unwrap();
         assert_eq!(data.language, Language::Es);
-        assert_eq!(data.work_duration_mins, 0);
+        // Missing durations must match the Default impl (90/15), not 0.
+        assert_eq!(data.work_duration_mins, 90);
+        assert_eq!(data.rest_duration_mins, 15);
         assert!(data.projects.is_empty());
         assert!(data.tasks.is_empty());
         assert_eq!(data.schema_version, 0);
+
+        // Explicit values (including 0) must be preserved.
+        let json_explicit = r#"{"work_duration_mins": 0, "rest_duration_mins": 25}"#;
+        let data: TrackerData = serde_json::from_str(json_explicit).unwrap();
+        assert_eq!(data.work_duration_mins, 0);
+        assert_eq!(data.rest_duration_mins, 25);
     }
 
     #[test]

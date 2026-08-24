@@ -10,6 +10,8 @@ pub enum Priority {
 }
 
 pub fn default_language() -> Language { Language::Es }
+pub fn default_work_duration_mins() -> u64 { 90 }
+pub fn default_rest_duration_mins() -> u64 { 15 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TrackerData {
@@ -17,9 +19,9 @@ pub struct TrackerData {
     pub schema_version: u32,
     #[serde(default = "default_language")]
     pub language: Language,
-    #[serde(default)]
+    #[serde(default = "default_work_duration_mins")]
     pub work_duration_mins: u64,
-    #[serde(default)]
+    #[serde(default = "default_rest_duration_mins")]
     pub rest_duration_mins: u64,
     #[serde(default)]
     pub ultradian_cycles_completed: u32,
@@ -42,8 +44,8 @@ impl Default for TrackerData {
         Self {
             schema_version: 1,
             language: default_language(),
-            work_duration_mins: 90,
-            rest_duration_mins: 15,
+            work_duration_mins: default_work_duration_mins(),
+            rest_duration_mins: default_rest_duration_mins(),
             ultradian_cycles_completed: 0,
             last_session_date: String::new(),
             projects: Vec::new(),

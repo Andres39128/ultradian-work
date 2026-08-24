@@ -75,6 +75,8 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | N12 | i18n | `i18n.rs:25` | "Cero ingresos cognitivos" — "ingresos" = income; "entradas de informacion" seria correcto (key muerta de todos modos) |
 | N13 | tests | `tracker.rs:973-975` | `std::env::set_var` (global de proceso, unsafe) en un test que corre en paralelo con los demas; hoy inofensivo (es el unico que usa el data path) pero fragil si se agregan tests que llamen `load()` |
 
+**Resueltos el 2026-08-23:** N5, N6, N7, N8, N9 (ver "Priorizacion sugerida" para el detalle de cada fix).
+
 ---
 
 ## Estado de hallazgos de la auditoria 2026-08-18
@@ -166,7 +168,7 @@ Binario release: 20 MB (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~
 - **C4/C5/C6** — 3 deduplicaciones con helper (una tarde)
 - ~~**B1**~~ — persistir sesion en curso — **resuelto** (ver tabla de estado)
 - ~~**C1 + C2**~~ — i18n de los 12 strings restantes y borrar 7 keys muertas — **resuelto** en `576ae29` (mismo commit)
-- **N5/N6/N7/N8/N9** — paquete de fixes pequenos
+- ~~**N5/N6/N7/N8/N9**~~ — paquete de fixes pequenos — **resuelto** el 2026-08-23 (N5: unlock al pausar Rest / lock al reanudar y al restart; N6: la sesion logueada usa el trabajo real no pausado, no la configuracion; N7: clamp del spacer negativo; N8: defaults de serde = 90/15, consistentes con `Default`; N9: prioridad de import case-insensitive)
 - **C9** — reescribir los 2 tests falsos para llamar a `create_task()`/`add_project()` reales (inyectando el data path, que ya existe)
 - Actualizar `eframe`+`egui_plot` a 0.36/0.37 en commit dedicado; `cargo audit`
 

@@ -51,6 +51,11 @@ struct AppState {
     tracker: tracker::TimeTrackerState,
     breath_start: Instant,
     screen_tools: screen::ScreenTools,
+    // Actual (non-paused) work accounting for the current work phase, so the
+    // logged session reflects real work instead of the configured duration.
+    work_phase_start: Instant,
+    work_paused_secs: u64,
+    work_pause_start: Option<Instant>,
 }
 
 impl AppState {
@@ -70,7 +75,16 @@ impl AppState {
             tracker,
             breath_start: Instant::now(),
             screen_tools: screen::ScreenTools::detect(),
+            work_phase_start: Instant::now(),
+            work_paused_secs: 0,
+            work_pause_start: None,
         }
+    }
+
+    fn start_work_phase(&mut self) {
+        self.work_phase_start = Instant::now();
+        self.work_paused_secs = 0;
+        self.work_pause_start = None;
     }
 
     fn work_dur(&self) -> Duration { Duration::from_secs(self.tracker.data.work_duration_mins * 60) }
@@ -90,11 +104,13 @@ impl AppState {
                 self.ultradian_state = TimerState::Work;
                 self.ultradian_start = Instant::now();
                 self.ultradian_remaining = self.work_dur();
+                self.start_work_phase();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             TimerState::Work => {
                 self.ultradian_state = TimerState::PausedWork;
                 // remaining is already up-to-date from tick()
+                self.work_pause_start = Some(Instant::now());
             }
             TimerState::Rest => {
                 self.ultradian_state = TimerState::PausedRest;
@@ -102,9 +118,15 @@ impl AppState {
                 if self.tracker.data.screen_dim_during_rest {
                     crate::screen::restore_screen();
                 }
+                if self.tracker.data.screen_lock_during_rest {
+                    crate::screen::unlock_screen();
+                }
             }
             TimerState::PausedWork => {
                 self.ultradian_state = TimerState::Work;
+                if let Some(pause_start) = self.work_pause_start.take() {
+                    self.work_paused_secs += pause_start.elapsed().as_secs();
+                }
                 let dur = self.work_dur();
                 if self.ultradian_remaining > dur {
                     self.ultradian_remaining = dur;
@@ -125,6 +147,9 @@ impl AppState {
                 if self.tracker.data.screen_dim_during_rest {
                     crate::screen::dim_screen();
                 }
+                if self.tracker.data.screen_lock_during_rest {
+                    crate::screen::lock_screen();
+                }
             }
         }
     }
@@ -136,6 +161,7 @@ impl AppState {
                 self.ultradian_state = TimerState::Work;
                 self.ultradian_remaining = self.work_dur();
                 self.ultradian_start = Instant::now();
+                self.start_work_phase();
             }
             TimerState::Rest | TimerState::PausedRest => {
                 self.ultradian_state = TimerState::Rest;
@@ -144,6 +170,9 @@ impl AppState {
                 self.breath_start = Instant::now();
                 if self.tracker.data.screen_dim_during_rest {
                     crate::screen::dim_screen();
+                }
+                if self.tracker.data.screen_lock_during_rest {
+                    crate::screen::lock_screen();
                 }
             }
         }
@@ -160,6 +189,7 @@ impl AppState {
         self.ultradian_state = TimerState::Work;
         self.ultradian_remaining = self.work_dur();
         self.ultradian_start = Instant::now();
+        self.start_work_phase();
         exit_rest_viewport(ctx);
         self.notify(
             crate::i18n::t(&lang, "notification_work_title"),
@@ -168,10 +198,11 @@ impl AppState {
     }
 
     fn log_ultradian_session(&mut self) {
-        let work_mins = self.tracker.data.work_duration_mins;
+        // Actual non-paused work time of the phase: wall span minus paused time.
+        let work_secs = self.work_phase_start.elapsed().as_secs().saturating_sub(self.work_paused_secs);
         let now = chrono::Local::now();
         let end = now.timestamp() as u64;
-        let start = end.saturating_sub(work_mins * 60);
+        let start = end.saturating_sub(work_secs);
         let today = now.format("%Y-%m-%d").to_string();
 
         let project_id = if let Some(active_id) = &self.tracker.active_project_id {
@@ -241,6 +272,7 @@ impl AppState {
                         self.ultradian_state = TimerState::Work;
                         self.ultradian_remaining = self.work_dur();
                         self.ultradian_start = Instant::now();
+                        self.start_work_phase();
                         exit_rest_viewport(ctx);
                         if self.tracker.data.screen_dim_during_rest {
                             crate::screen::restore_screen();
@@ -464,7 +496,7 @@ impl AppState {
                 };
 
                 ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() / 2.0 - 160.0);
+                    ui.add_space((ui.available_height() / 2.0 - 160.0).max(0.0));
 
                     ui.label(egui::RichText::new(status).color(color).size(30.0));
                     ui.add_space(10.0);
