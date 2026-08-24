@@ -24,10 +24,10 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | Check | Resultado |
 |---|---|
 | `cargo check --all-targets` | OK, sin errores |
-| `cargo test` | **18/18 pasaron en 0.01s** (el test de pantalla ya es seguro gracias a `cfg!(test)`; el test de datos usa `ULTRADIANT_DATA_PATH`) |
+| `cargo test` | **24/24 pasaron en 0.01s** (el test de pantalla ya es seguro gracias a `cfg!(test)`; el test de datos usa `ULTRADIANT_DATA_PATH`) |
 | `cargo clippy --all-targets` | 6 warnings, todos en tests (`bool_assert_comparison` x5: tracker.rs:1005,1139,1140,1145,1146; `field_reassign_with_default` x1: tracker.rs:1013). Produccion limpia |
-| Binario release | 20 MB |
-| Duplicados en dep tree | Una sola copia de `egui 0.33.3` (eframe 0.33.3 + egui_plot 0.34.1 compatibles) |
+| Binario release | 29 MB (eframe 0.36, unstripped) |
+| Duplicados en dep tree | Una sola copia de `egui 0.36.1` (eframe 0.36.1 + egui_plot 0.37.0 compatibles, verificado en `e533b4b`) |
 
 **Nota:** `cargo test` ya es seguro de correr (arreglos A3/A4 verificados).
 
@@ -136,13 +136,15 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 
 Actualizado desde la auditoria previa: `calamine` 0.34→**0.36.1**, `rust_xlsxwriter` 0.95→**0.98.2**, patches de chrono/clap/serde/serde_json/uuid/notify-rust, `ctrlc` agregado.
 
+Actualizado 2026-08-23: `eframe` 0.33.3→**0.36.1** + `egui_plot` 0.34.1→**0.37.0** (commit dedicado `e533b4b`, con migracion de `App::update` a `logic`/`ui` de eframe 0.36).
+
 | Crates | Actual | Disponible | Delta |
 |---|---|---|---|
-| `eframe` | 0.33.3 | 0.36.1 | **3 minors atras** (el unico salto con riesgo breaking, viewport APIs) |
-| `egui_plot` | 0.34.1 | 0.37.0 | 3 minors (acompana a eframe; hoy comparten egui 0.33.3 sin duplicados) |
+| `eframe` | 0.36.1 | 0.36.1 | **al dia** (migrado en `e533b4b`: `App::update` → `logic`/`ui`, `TopBottomPanel` → `Panel`, `ctx.style()` → `ctx.style_of(ctx.theme())`) |
+| `egui_plot` | 0.37.0 | 0.37.0 | al dia (acompana a eframe; comparten una sola `egui 0.36.1` sin duplicados) |
 | resto | — | — | al dia o solo patches |
 
-`cargo audit` no se pudo ejecutar (no instalado): recomendable antes de release.
+`cargo audit` (0.22.2, 2026-08-23): **0 vulnerabilidades**, 1 warning — `ttf-parser 0.25.1` unmaintained (transitiva de egui, no accionable en este repo).
 
 ## Metricas de codigo
 
@@ -154,7 +156,7 @@ Actualizado desde la auditoria previa: `calamine` 0.34→**0.36.1**, `rust_xlsxw
 | `src/i18n.rs` | 213 | 9% | ~180 brazos de match; 7 muertas |
 | `src/models.rs` | 121 | 5% | Limpio, con metodos de dominio (`total_duration`, `today_duration_secs`) |
 
-Binario release: 20 MB (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~20-30%).
+Binario release: 29 MB con eframe 0.36 (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~20-30%).
 
 ## Priorizacion sugerida
 
@@ -170,7 +172,7 @@ Binario release: 20 MB (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~
 - ~~**C1 + C2**~~ — i18n de los 12 strings restantes y borrar 7 keys muertas — **resuelto** en `576ae29` (mismo commit)
 - ~~**N5/N6/N7/N8/N9**~~ — paquete de fixes pequenos — **resuelto** el 2026-08-23 (N5: unlock al pausar Rest / lock al reanudar y al restart; N6: la sesion logueada usa el trabajo real no pausado, no la configuracion; N7: clamp del spacer negativo; N8: defaults de serde = 90/15, consistentes con `Default`; N9: prioridad de import case-insensitive)
 - ~~**C9**~~ — reescribir los 2 tests falsos para llamar a `create_task()`/`add_project()` reales — **resuelto** en `4e0498d` (data path inyectado + lock contra race de env var entre tests)
-- Actualizar `eframe`+`egui_plot` a 0.36/0.37 en commit dedicado; `cargo audit`
+- ~~Actualizar `eframe`+`egui_plot` a 0.36/0.37 en commit dedicado; `cargo audit`~~ — **resuelto** en `e533b4b` (migracion `update`→`logic`/`ui` + `Panel` + `style_of`; `cargo audit`: 0 vulnerabilidades, 1 warning transitiva)
 
 **Mediano plazo (deuda estructural):**
 - **PROD-002** — partir `tracker.rs`: extraer logica de sesion/tareas a `session_logic.rs`/`task_logic.rs` (puras, sin egui) y dejar solo render en `tracker.rs`; habilita testear logica sin UI
