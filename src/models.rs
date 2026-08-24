@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::i18n::Language;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default, Debug)]
 pub enum Priority {
@@ -9,9 +9,15 @@ pub enum Priority {
     Baja,
 }
 
-pub fn default_language() -> Language { Language::Es }
-pub fn default_work_duration_mins() -> u64 { 90 }
-pub fn default_rest_duration_mins() -> u64 { 15 }
+pub fn default_language() -> Language {
+    Language::Es
+}
+pub fn default_work_duration_mins() -> u64 {
+    90
+}
+pub fn default_rest_duration_mins() -> u64 {
+    15
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TrackerData {
@@ -125,20 +131,35 @@ impl Project {
 
     pub fn today_duration_secs(&self) -> u64 {
         let now = chrono::Local::now();
-        let start_of_day = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_local_timezone(chrono::Local).unwrap().timestamp() as u64;
+        let start_of_day = now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .unwrap()
+            .timestamp() as u64;
         let end_of_day = start_of_day + 86400;
 
-        self.sessions.iter().map(|s| {
-            let mut total = 0u64;
-            if s.end_time > start_of_day && s.start_time < end_of_day {
-                total += s.end_time.min(end_of_day).saturating_sub(s.start_time.max(start_of_day));
-            }
-            for sub in &s.sub_sessions {
-                if sub.end_time > start_of_day && sub.start_time < end_of_day {
-                    total += sub.end_time.min(end_of_day).saturating_sub(sub.start_time.max(start_of_day));
+        self.sessions
+            .iter()
+            .map(|s| {
+                let mut total = 0u64;
+                if s.end_time > start_of_day && s.start_time < end_of_day {
+                    total += s
+                        .end_time
+                        .min(end_of_day)
+                        .saturating_sub(s.start_time.max(start_of_day));
                 }
-            }
-            total
-        }).sum()
+                for sub in &s.sub_sessions {
+                    if sub.end_time > start_of_day && sub.start_time < end_of_day {
+                        total += sub
+                            .end_time
+                            .min(end_of_day)
+                            .saturating_sub(sub.start_time.max(start_of_day));
+                    }
+                }
+                total
+            })
+            .sum()
     }
 }

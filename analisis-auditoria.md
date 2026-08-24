@@ -94,24 +94,24 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | B3 | Sin eliminar proyectos | **ARREGLADO** | `deleting_project_id` + confirm window (`tracker.rs:265-298`) — pero con el bug N1 |
 | B4 | Doble trigger de hotkeys | **ARREGLADO** | `has_focus` guard en `main.rs:340-351` |
 | B5 | Ultradian siempre al 1er proyecto | **ARRELLADO** | Usa `active_project_id` primero (`main.rs:173-177`). Quedan: nombre "Ultradian" hardcodeado (`:181`) y sesion descartada en silencio si el proyecto desaparece (`:187`, `if let` sin else) |
-| B6 | Scan O(n²) en tareas | **ABIERTO** | `tracker.rs:601-602` (`find` por frame por id) + 2do `find` en `:649-650`; agravado por 10 clones de String por tarea por frame (`:603-610`) |
+| B6 | Scan O(n²) en tareas | **ARREGLADO** (2026-08-23) | El listado ahora itera por índice (`visible: Vec<usize>`): sin `Vec<String>` de ids, sin `iter_mut().find` O(n²) por frame y sin los 8 clones de String por tarea por frame; el único clone de id queda solo en el toggle de completed (1 por click, no por frame) |
 | C1 | Strings hardcodeados ES | **ARREGLADO** | 12 strings → 16 keys i18n (`date_unix`, `exported_to`, `error_export`, `error_open_file`, `sheet_not_found`, `imported_tasks`, 7x `excel_header_*`, `none`, `chart_projects`, `ultradian_project`). Quedan canónicos (no i18n) el nombre de sheet "Pendientes" y los valores "Alta/Media/Baja": el import los busca por literal, localizarlos rompería el roundtrip entre idiomas |
 | C2 | 7 keys i18n muertas | **ARREGLADO** | Borradas `project`, `select_project`, `search_placeholder`, `screen_dim_available`, `screen_lock_available`, `ultradian_rest_title`, `ultradian_rest_desc`; el test de keys se amplió a cubrir las 16 nuevas |
 | C3 | Key desconocida → "" | **ARREGLADO** (2026-08-23, junto a PROD-013) | sigue retornando `""` (degradacion elegante) pero loguea `[i18n] unknown key` en builds debug |
-| C4 | Expresion total_secs x3 | **ABIERTO** | Duplicada en `tracker.rs:216-217` y `:422-423` aunque `Project::total_duration` existe (`models.rs:93-101`) |
-| C5 | Bloque export_message x2 | **ABIERTO** | Identico en `tracker.rs:321-328` y `:523-530` |
-| C6 | Tripleto Fullscreen/WindowLevel x3 | **ABIERTO** | `main.rs:158-159`, `:240-241`, `:323-324` → helper `exit_rest_viewport(ctx)` |
+| C4 | Expresion total_secs x3 | **ARREGLADO** (2026-08-23) | Nota original referenciaba `panels.rs`/`app.rs` (layout antiguo). En el layout actual ya no hay expresion inline duplicada: `Project::total_duration()` se usa en las 2 vistas (`tracker.rs:776`, `:833`) |
+| C5 | Bloque export_message x2 | **ARREGLADO** (2026-08-23) | Helper `set_export_message()` en `task_logic.rs` (mensaje + timestamp de expiracion); 5 call sites (import, export exito, error_open_file, sheet_not_found, error_export) sin mas asignaciones duplicadas |
+| C6 | Tripleto Fullscreen/WindowLevel x3 | **ARREGLADO** (2026-08-23) | Nota original referenciaba layout antiguo. El helper `exit_rest_viewport(ctx)` existe (`main.rs:42-45`) y se usa en las 3 ubicaciones (`:220`, `:319`, `:456`) |
 | C7 | Dead code en screen.rs | **ARREGLADO** (2026-08-23) | Borrados los wrappers pub muertos `get_saved_brightness`/`save_brightness` y sus `#[allow(dead_code)]`; `restore_screen` ahora usa `get_saved_brightness_from` (el helper paso a tener uso productivo); `save_brightness_to` ya era usado por `dim_screen` |
 | C8 | Sentinel "handled" | **ARREGLADO** (2026-08-23, junto a PROD-002: el dance de `session_to_delete` se reemplazo por limpiar `deleting_session_id` directo al confirmar/cancelar) | `tracker.rs:486-490` |
 | C9 | Tests de validacion falsos | **ARREGLADO** | Tests reescritos para llamar a `create_task()`/`add_project()` reales con `ULTRADIANT_DATA_PATH` inyectado; lock de mutex serializa los tests que mutan la env var (race detectado al agregarlos) |
-| C10 | Nombre fijo test_export.xlsx | **ABIERTO** | `tracker.rs:970` (riesgo de colision entre runs) |
-| C11 | Clippy en tests | **ABIERTO** | 6 warnings confirmados hoy (ver arriba) |
+| C10 | Nombre fijo test_export.xlsx | **ARREGLADO** (2026-08-23) | Los archivos de test ahora son por proceso: `test_export_{pid}.xlsx`, `test_import_priority_{pid}.xlsx` (+ `.json` de datos); el test de roundtrip ya lo era |
+| C11 | Clippy en tests | **ARREGLADO** (2026-08-23) | `cargo clippy --all-targets` a 0 warnings (los 5 bool asserts + 1 field reassign desaparecieron en el refactor) |
 | C12 | Ruta fija /tmp para brillo | **ARREGLADO** (2026-08-23) | El nivel de brillo se guarda en la data dir del proyecto (`TimeTrackerState::data_dir()/brightness`, junto a `tracker_data.json`); `save_brightness_to` crea el directorio y reporta el error via tracing. Queda: archivo stale tras `kill -9` (no en el alcance de este fix) |
 | C13 | Multi-monitor brightnessctl | **ARREGLADO** (2026-08-23) | `parse_brightness_output()` toma la primera linea no vacia de `brightnessctl g` y quita la anotacion de dispositivo (`74% [backlight]` → `74%`); `brightnessctl s` sin `-d` apunta al mismo dispositivo default. 5 tests nuevos |
 | C14 | README con placeholder | **ARREGLADO** (2026-08-23) | URL real `https://github.com/Andres39128/ultradian-work`; secciones nuevas: atajos (Espacio/R/S), opciones CLI (`--work`/`--rest`), dim/lock con tools y deps opcionales |
 | C15 | install.sh sin prerequisitos | **ARREGLADO** | `check_prerequisites` verifica cargo/rustc + avisa de deps opcionales (`install.sh:26-49`) |
 
-**Resumen: 21 arreglados, 0 parciales, 6 abiertos** (de 27).
+**Resumen: 27 arreglados, 0 parciales, 0 abiertos** (de 27) — backlog completo el 2026-08-23.
 
 ## Estado de hallazgos de la auditoria 2026-05-11 (PROD)
 
@@ -169,7 +169,10 @@ Binario release: 31 MB con eframe 0.36 + tracing (eframe/wgpu; `RUSTFLAGS="-C st
 4. **N2** — `ui_dashboard(&self)` y borrar el clone (3 lineas)
 
 **Corto plazo (riesgo de datos / calidad):**
-- **C4/C5/C6** — 3 deduplicaciones con helper (una tarde)
+- ~~**C4/C5/C6**~~ — 3 deduplicaciones con helper — **resuelto** el 2026-08-23 (ver tabla de estado)
+- ~~**B6**~~ — scan O(n²) del listado de tareas — **resuelto** el 2026-08-23 (iteración por índice, sin `find` por frame ni clones por tarea)
+- ~~**C10**~~ — nombres de archivo de tests por proceso — **resuelto** el 2026-08-23
+- ~~**C11**~~ — 6 warnings de clippy en tests — **resuelto** el 2026-08-23 (clippy a 0 warnings)
 - ~~**B1**~~ — persistir sesion en curso — **resuelto** (ver tabla de estado)
 - ~~**C1 + C2**~~ — i18n de los 12 strings restantes y borrar 7 keys muertas — **resuelto** en `576ae29` (mismo commit)
 - ~~**N5/N6/N7/N8/N9**~~ — paquete de fixes pequenos — **resuelto** el 2026-08-23 (N5: unlock al pausar Rest / lock al reanudar y al restart; N6: la sesion logueada usa el trabajo real no pausado, no la configuracion; N7: clamp del spacer negativo; N8: defaults de serde = 90/15, consistentes con `Default`; N9: prioridad de import case-insensitive)

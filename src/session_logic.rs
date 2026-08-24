@@ -26,14 +26,22 @@ impl TimeTrackerState {
             || self.active_parent_session_id.is_some()
             || self.is_tracking
             || self.current_session_elapsed > 0;
+        // Fold the live interval into the accumulated seconds before
+        // persisting; otherwise any intermediate save while tracking would
+        // drop the time since the interval started.
+        let elapsed_secs = self.session_display_secs();
         self.data.active_session = if has_state {
             Some(ActiveSession {
                 project_id: self.active_project_id.clone().unwrap_or_default(),
                 session_name: self.active_session_name.clone(),
                 parent_session_id: self.active_parent_session_id.clone(),
                 is_tracking: self.is_tracking,
-                start_unix: if self.is_tracking { chrono::Local::now().timestamp() as u64 } else { 0 },
-                elapsed_secs: self.current_session_elapsed,
+                start_unix: if self.is_tracking {
+                    chrono::Local::now().timestamp() as u64
+                } else {
+                    0
+                },
+                elapsed_secs,
             })
         } else {
             None
@@ -51,7 +59,8 @@ impl TimeTrackerState {
     pub(crate) fn add_project(&mut self) {
         self.new_project_error = None;
         if self.new_project_name.trim().is_empty() {
-            self.new_project_error = Some(crate::i18n::t(&self.data.language, "error_empty_name").to_string());
+            self.new_project_error =
+                Some(crate::i18n::t(&self.data.language, "error_empty_name").to_string());
             return;
         }
         let id = uuid::Uuid::new_v4().to_string();
@@ -83,11 +92,16 @@ impl TimeTrackerState {
     }
 
     pub(crate) fn finish_session(&mut self) {
-        let Some(proj_id) = &self.active_project_id else { return };
-        let Some(proj) = self.data.projects.iter_mut().find(|p| &p.id == proj_id) else { return };
+        let Some(proj_id) = &self.active_project_id else {
+            return;
+        };
+        let Some(proj) = self.data.projects.iter_mut().find(|p| &p.id == proj_id) else {
+            return;
+        };
 
         if self.is_tracking
-            && let Some(start) = self.current_session_start {
+            && let Some(start) = self.current_session_start
+        {
             self.current_session_elapsed += start.elapsed().as_secs();
         }
 
@@ -100,7 +114,11 @@ impl TimeTrackerState {
 
         let name = if self.active_session_name.trim().is_empty() {
             let lang = self.data.language;
-            format!("{} {}", crate::i18n::t(&lang, "session_label"), proj.sessions.len() + 1)
+            format!(
+                "{} {}",
+                crate::i18n::t(&lang, "session_label"),
+                proj.sessions.len() + 1
+            )
         } else {
             self.active_session_name.clone()
         };
@@ -172,7 +190,8 @@ impl TimeTrackerState {
     /// Renames a session. No-op if the project or session is missing.
     pub(crate) fn rename_session(&mut self, project_id: &str, session_id: &str, new_name: String) {
         if let Some(proj) = self.data.projects.iter_mut().find(|p| p.id == project_id)
-            && let Some(sess) = proj.sessions.iter_mut().find(|s| s.id == session_id) {
+            && let Some(sess) = proj.sessions.iter_mut().find(|s| s.id == session_id)
+        {
             sess.name = new_name;
             self.save();
         }
@@ -196,7 +215,11 @@ impl TimeTrackerState {
             }
 
             if workbook.save(file_path).is_ok() {
-                self.export_message = Some(format!("{} {}", crate::i18n::t(&lang, "exported_to"), file_path.display()));
+                self.export_message = Some(format!(
+                    "{} {}",
+                    crate::i18n::t(&lang, "exported_to"),
+                    file_path.display()
+                ));
                 self.export_message_time = Some(Instant::now());
             } else {
                 self.export_message = Some(crate::i18n::t(&lang, "error_export").to_string());
@@ -257,7 +280,11 @@ mod tests {
         let _ = std::fs::remove_file(&data_path);
 
         let mut state = TimeTrackerState::load();
-        state.data.projects.push(Project { id: "p1".into(), name: "P".into(), sessions: vec![] });
+        state.data.projects.push(Project {
+            id: "p1".into(),
+            name: "P".into(),
+            sessions: vec![],
+        });
         state.active_project_id = Some("p1".into());
         state.is_tracking = true;
         state.current_session_elapsed = 30;
@@ -297,7 +324,9 @@ mod tests {
 
         let mut state = TimeTrackerState::load();
         state.is_tracking = true;
-        let start = Instant::now().checked_sub(std::time::Duration::from_secs(120)).unwrap();
+        let start = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(120))
+            .unwrap();
         state.current_session_start = Some(start);
         state.current_session_elapsed = 30;
 
@@ -323,7 +352,11 @@ mod tests {
 
         state.sync_active_session();
 
-        let active = state.data.active_session.as_ref().expect("active_session should be persisted");
+        let active = state
+            .data
+            .active_session
+            .as_ref()
+            .expect("active_session should be persisted");
         assert_eq!(active.project_id, "p1");
         assert_eq!(active.session_name, "Sesión");
         assert_eq!(active.parent_session_id.as_deref(), Some("s1"));
@@ -337,6 +370,32 @@ mod tests {
         let mut state = TimeTrackerState::default();
         state.sync_active_session();
         assert_eq!(state.data.active_session, None);
+    }
+
+    #[test]
+    fn test_sync_active_session_folds_live_interval() {
+        // While tracking, the persisted elapsed_secs must include the live
+        // interval; otherwise an intermediate save (task toggle, settings...)
+        // would drop it on crash/restore.
+        let mut state = TimeTrackerState {
+            active_project_id: Some("p1".into()),
+            is_tracking: true,
+            current_session_elapsed: 30,
+            current_session_start: Some(
+                Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(120))
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
+
+        state.sync_active_session();
+
+        let active = state.data.active_session.as_ref().expect("active_session");
+        assert!(active.elapsed_secs >= 150);
+        // The in-memory accumulated value must stay untouched; folding is
+        // only for persistence (idempotent across repeated saves).
+        assert_eq!(state.current_session_elapsed, 30);
     }
 
     #[test]

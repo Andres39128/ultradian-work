@@ -92,7 +92,9 @@ impl ScreenTools {
 }
 
 pub fn is_wayland() -> bool {
-    std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false)
+    std::env::var("XDG_SESSION_TYPE")
+        .map(|v| v == "wayland")
+        .unwrap_or(false)
         || std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
@@ -101,7 +103,8 @@ pub fn install_signal_handlers() {
         restore_screen();
         unlock_screen();
         std::process::exit(0);
-    }).unwrap_or_else(|e| {
+    })
+    .unwrap_or_else(|e| {
         tracing::error!(error = %e, "failed to install Ctrl+C handler");
     });
 }
@@ -116,9 +119,7 @@ pub fn dim_screen() {
         return;
     }
     // Try brightnessctl first: get current level, save it, then dim to 5%.
-    if let Ok(output) = Command::new("brightnessctl")
-        .arg("g")
-        .output()
+    if let Ok(output) = Command::new("brightnessctl").arg("g").output()
         && output.status.success()
     {
         let current = String::from_utf8_lossy(&output.stdout);
@@ -127,7 +128,8 @@ pub fn dim_screen() {
         // would store the dimmed level as the "original" and break the restore.
         if !save_path.exists()
             && let Some(level) = parse_brightness_output(&current)
-            && let Err(e) = save_brightness_to(&save_path, &level) {
+            && let Err(e) = save_brightness_to(&save_path, &level)
+        {
             tracing::error!(error = %e, "failed to save current brightness level, restore after rest will be skipped");
         }
         // Dim to 5%.
@@ -206,17 +208,13 @@ pub fn lock_screen() {
     if cfg!(test) {
         return;
     }
-    if let Ok(status) = Command::new("loginctl")
-        .arg("lock-session")
-        .status()
+    if let Ok(status) = Command::new("loginctl").arg("lock-session").status()
         && status.success()
     {
         return;
     }
 
-    if let Ok(status) = Command::new("xdg-screensaver")
-        .arg("lock")
-        .status()
+    if let Ok(status) = Command::new("xdg-screensaver").arg("lock").status()
         && status.success()
     {
         return;
@@ -233,17 +231,13 @@ pub fn unlock_screen() {
     if cfg!(test) {
         return;
     }
-    if let Ok(status) = Command::new("loginctl")
-        .arg("unlock-session")
-        .status()
+    if let Ok(status) = Command::new("loginctl").arg("unlock-session").status()
         && status.success()
     {
         return;
     }
 
-    if let Ok(status) = Command::new("xdg-screensaver")
-        .arg("unlock")
-        .status()
+    if let Ok(status) = Command::new("xdg-screensaver").arg("unlock").status()
         && status.success()
     {
         return;
@@ -308,12 +302,13 @@ mod tests {
 
     #[test]
     fn test_get_brightness_when_no_file() {
-        let temp = std::env::temp_dir().join(format!("ultradian-test-missing-{}", std::process::id()));
+        let temp =
+            std::env::temp_dir().join(format!("ultradian-test-missing-{}", std::process::id()));
         let _ = std::fs::remove_file(&temp);
         assert_eq!(get_saved_brightness_from(&temp), None);
     }
 
-#[test]
+    #[test]
     fn test_dim_and_restore_do_not_panic() {
         dim_screen();
         restore_screen();
@@ -338,7 +333,10 @@ mod tests {
 
     #[test]
     fn test_parse_brightness_output_strips_device_annotation() {
-        assert_eq!(parse_brightness_output("74% [unknown]"), Some("74%".to_string()));
+        assert_eq!(
+            parse_brightness_output("74% [unknown]"),
+            Some("74%".to_string())
+        );
     }
 
     #[test]
@@ -349,7 +347,10 @@ mod tests {
 
     #[test]
     fn test_parse_brightness_output_skips_blank_lines() {
-        assert_eq!(parse_brightness_output("\n\n  80% [backlight]\n"), Some("80%".to_string()));
+        assert_eq!(
+            parse_brightness_output("\n\n  80% [backlight]\n"),
+            Some("80%".to_string())
+        );
     }
 
     #[test]

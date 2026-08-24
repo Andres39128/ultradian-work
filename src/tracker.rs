@@ -1,8 +1,8 @@
+use crate::screen::ScreenTools;
+use eframe::egui;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
-use eframe::egui;
-use crate::screen::ScreenTools;
 
 pub use crate::models::*;
 
@@ -47,7 +47,8 @@ impl TimeTrackerState {
     /// Project data directory (e.g. `~/.local/share/com.DevPersonal.UltradianTimer`).
     /// Shared by the tracker data file and the brightness save file (screen.rs).
     pub fn data_dir() -> Option<PathBuf> {
-        directories::ProjectDirs::from("com", "DevPersonal", "UltradianTimer").map(|d| d.data_dir().to_path_buf())
+        directories::ProjectDirs::from("com", "DevPersonal", "UltradianTimer")
+            .map(|d| d.data_dir().to_path_buf())
     }
 
     fn get_data_path() -> PathBuf {
@@ -66,15 +67,13 @@ impl TimeTrackerState {
         let path = Self::get_data_path();
         let data = if path.exists() {
             match fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(data) => data,
-                        Err(e) => {
-                            tracing::error!(path = %path.display(), error = %e, "failed to parse tracker data file, file preserved, starting with defaults");
-                            TrackerData::default()
-                        }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        tracing::error!(path = %path.display(), error = %e, "failed to parse tracker data file, file preserved, starting with defaults");
+                        TrackerData::default()
                     }
-                }
+                },
                 Err(e) => {
                     tracing::error!(path = %path.display(), error = %e, "failed to read tracker data file, starting with defaults");
                     TrackerData::default()
@@ -84,13 +83,29 @@ impl TimeTrackerState {
             TrackerData::default()
         };
 
-        let active = data.active_session.as_ref().filter(|a| {
-            data.projects.iter().any(|p| p.id == a.project_id)
-        });
-        let (active_project_id, active_session_name, active_parent_session_id, is_tracking, current_session_start, current_session_elapsed) = match active {
+        let active = data
+            .active_session
+            .as_ref()
+            .filter(|a| data.projects.iter().any(|p| p.id == a.project_id));
+        let (
+            active_project_id,
+            active_session_name,
+            active_parent_session_id,
+            is_tracking,
+            current_session_start,
+            current_session_elapsed,
+        ) = match active {
             Some(a) => {
-                let (is_tracking, current_session_elapsed) = crate::session_logic::restored_session_state(a, chrono::Local::now().timestamp() as u64);
-                let current_session_start = if is_tracking { Some(Instant::now()) } else { None };
+                let (is_tracking, current_session_elapsed) =
+                    crate::session_logic::restored_session_state(
+                        a,
+                        chrono::Local::now().timestamp() as u64,
+                    );
+                let current_session_start = if is_tracking {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
                 (
                     Some(a.project_id.clone()),
                     a.session_name.clone(),
@@ -153,7 +168,8 @@ impl TimeTrackerState {
 
     fn show_export_message(&mut self, ui: &mut egui::Ui) {
         if let Some(msg) = &self.export_message
-            && let Some(time) = self.export_message_time {
+            && let Some(time) = self.export_message_time
+        {
             if time.elapsed().as_secs() < 5 {
                 ui.label(egui::RichText::new(msg).color(egui::Color32::GREEN));
             } else {
@@ -175,7 +191,11 @@ impl TimeTrackerState {
         });
 
         if let Some(ref err) = self.new_project_error {
-            ui.label(egui::RichText::new(err).color(egui::Color32::RED).size(12.0));
+            ui.label(
+                egui::RichText::new(err)
+                    .color(egui::Color32::RED)
+                    .size(12.0),
+            );
         }
 
         ui.separator();
@@ -190,11 +210,16 @@ impl TimeTrackerState {
                     ui.horizontal(|ui| {
                         let is_selected = self.active_project_id.as_deref() == Some(&proj.id);
                         if ui.selectable_label(is_selected, &proj.name).clicked()
-                            && !self.is_tracking {
+                            && !self.is_tracking
+                        {
                             self.active_project_id = Some(proj.id.clone());
                         }
-                        if ui.button("🗑").on_hover_text(crate::i18n::t(&lang, "delete_tooltip")).clicked()
-                            && !self.is_tracking {
+                        if ui
+                            .button("🗑")
+                            .on_hover_text(crate::i18n::t(&lang, "delete_tooltip"))
+                            .clicked()
+                            && !self.is_tracking
+                        {
                             self.deleting_project_id = Some(proj.id.clone());
                         }
                     });
@@ -231,17 +256,29 @@ impl TimeTrackerState {
                 ui.set_min_height(available_height);
                 ui.set_min_width(ui.available_width());
                 if let Some(proj_id) = self.active_project_id.clone() {
-                    let proj_name = self.data.projects.iter().find(|p| p.id == proj_id).map(|p| p.name.clone()).unwrap_or_default();
+                    let proj_name = self
+                        .data
+                        .projects
+                        .iter()
+                        .find(|p| p.id == proj_id)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
 
-                    ui.heading(format!("{} {}", crate::i18n::t(&lang, "project_label"), proj_name));
+                    ui.heading(format!(
+                        "{} {}",
+                        crate::i18n::t(&lang, "project_label"),
+                        proj_name
+                    ));
                     ui.add_space(10.0);
 
                     if ui.button(crate::i18n::t(&lang, "export_excel")).clicked()
-                        && let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id).cloned()
+                        && let Some(proj) =
+                            self.data.projects.iter().find(|p| p.id == proj_id).cloned()
                         && let Some(path) = rfd::FileDialog::new()
                             .add_filter("Excel Workbook", &["xlsx"])
                             .set_file_name(format!("{}_export.xlsx", proj.name))
-                            .save_file() {
+                            .save_file()
+                    {
                         self.export_project_to_file(&proj, &path);
                     }
 
@@ -251,7 +288,11 @@ impl TimeTrackerState {
 
                     ui.group(|ui| {
                         if self.active_parent_session_id.is_some() {
-                            ui.heading(format!("{} {}", crate::i18n::t(&lang, "continuing_session"), self.active_session_name));
+                            ui.heading(format!(
+                                "{} {}",
+                                crate::i18n::t(&lang, "continuing_session"),
+                                self.active_session_name
+                            ));
                         } else {
                             ui.heading(crate::i18n::t(&lang, "new_work_session"));
                             ui.horizontal(|ui| {
@@ -264,18 +305,34 @@ impl TimeTrackerState {
                         }
 
                         let current_secs = self.session_display_secs();
-                        let display = format!("{:02}:{:02}:{:02}", current_secs / 3600, (current_secs % 3600) / 60, current_secs % 60);
+                        let display = format!(
+                            "{:02}:{:02}:{:02}",
+                            current_secs / 3600,
+                            (current_secs % 3600) / 60,
+                            current_secs % 60
+                        );
 
-                        ui.label(egui::RichText::new(display).size(30.0).strong().color(if self.is_tracking { egui::Color32::GREEN } else { egui::Color32::WHITE }));
+                        ui.label(egui::RichText::new(display).size(30.0).strong().color(
+                            if self.is_tracking {
+                                egui::Color32::GREEN
+                            } else {
+                                egui::Color32::WHITE
+                            },
+                        ));
 
                         ui.horizontal(|ui| {
-                            let btn_text = if self.is_tracking { crate::i18n::t(&lang, "pause") } else { crate::i18n::t(&lang, "start") };
+                            let btn_text = if self.is_tracking {
+                                crate::i18n::t(&lang, "pause")
+                            } else {
+                                crate::i18n::t(&lang, "start")
+                            };
                             if ui.button(btn_text).clicked() {
                                 self.toggle_tracking(ctx);
                             }
 
                             if (current_secs > 0 || self.active_parent_session_id.is_some())
-                                && ui.button(crate::i18n::t(&lang, "finish_save")).clicked() {
+                                && ui.button(crate::i18n::t(&lang, "finish_save")).clicked()
+                            {
                                 self.finish_session();
                             }
                         });
@@ -287,7 +344,8 @@ impl TimeTrackerState {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.text_edit_singleline(&mut self.session_search_query);
                             if !self.session_search_query.is_empty()
-                                && ui.button(crate::i18n::t(&lang, "clear_search")).clicked() {
+                                && ui.button(crate::i18n::t(&lang, "clear_search")).clicked()
+                            {
                                 self.session_search_query.clear();
                             }
                             ui.label("🔍");
@@ -301,65 +359,148 @@ impl TimeTrackerState {
                         .auto_shrink([false, false])
                         .max_height(ui.available_height())
                         .show(ui, |ui| {
-                        if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id) {
-                            for session in &proj.sessions {
-                                if !self.session_search_query.is_empty() && !session.name.to_lowercase().contains(&self.session_search_query.to_lowercase()) {
-                                    continue;
-                                }
-                                ui.push_id(&session.id, |ui| {
-                                    ui.group(|ui| {
-                                        ui.horizontal(|ui| {
-                                            if self.editing_session_id.as_ref() == Some(&(proj_id.clone(), session.id.clone())) {
-                                                ui.text_edit_singleline(&mut self.editing_session_name);
-                                                if ui.button(crate::i18n::t(&lang, "save")).clicked() {
-                                                    session_to_save = Some((session.id.clone(), self.editing_session_name.clone()));
-                                                    self.editing_session_id = None;
-                                                }
-                                                if ui.button(crate::i18n::t(&lang, "cancel")).clicked() {
-                                                    self.editing_session_id = None;
-                                                }
-                                            } else {
-                                                ui.label(egui::RichText::new(&session.name).strong());
+                            if let Some(proj) = self.data.projects.iter().find(|p| p.id == proj_id)
+                            {
+                                for session in &proj.sessions {
+                                    if !self.session_search_query.is_empty()
+                                        && !session
+                                            .name
+                                            .to_lowercase()
+                                            .contains(&self.session_search_query.to_lowercase())
+                                    {
+                                        continue;
+                                    }
+                                    ui.push_id(&session.id, |ui| {
+                                        ui.group(|ui| {
+                                            ui.horizontal(|ui| {
+                                                if self.editing_session_id.as_ref()
+                                                    == Some(&(proj_id.clone(), session.id.clone()))
+                                                {
+                                                    ui.text_edit_singleline(
+                                                        &mut self.editing_session_name,
+                                                    );
+                                                    if ui
+                                                        .button(crate::i18n::t(&lang, "save"))
+                                                        .clicked()
+                                                    {
+                                                        session_to_save = Some((
+                                                            session.id.clone(),
+                                                            self.editing_session_name.clone(),
+                                                        ));
+                                                        self.editing_session_id = None;
+                                                    }
+                                                    if ui
+                                                        .button(crate::i18n::t(&lang, "cancel"))
+                                                        .clicked()
+                                                    {
+                                                        self.editing_session_id = None;
+                                                    }
+                                                } else {
+                                                    ui.label(
+                                                        egui::RichText::new(&session.name).strong(),
+                                                    );
 
-                                                if ui.button(crate::i18n::t(&lang, "continue")).clicked() {
-                                                    continue_session = Some((proj_id.clone(), session.id.clone(), session.name.clone()));
-                                                }
+                                                    if ui
+                                                        .button(crate::i18n::t(&lang, "continue"))
+                                                        .clicked()
+                                                    {
+                                                        continue_session = Some((
+                                                            proj_id.clone(),
+                                                            session.id.clone(),
+                                                            session.name.clone(),
+                                                        ));
+                                                    }
 
-                                                if ui.button("✏").on_hover_text(crate::i18n::t(&lang, "edit_tooltip")).clicked() {
-                                                    self.editing_session_id = Some((proj_id.clone(), session.id.clone()));
-                                                    self.editing_session_name = session.name.clone();
-                                                }
-                                                if ui.button("🗑").on_hover_text(crate::i18n::t(&lang, "delete_tooltip")).clicked() {
-                                                    self.deleting_session_id = Some((proj_id.clone(), session.id.clone()));
-                                                }
-                                            }
-                                        });
-
-                                        let total_secs = session.total_duration();
-
-                                        let time_str = format!("{:02}:{:02}:{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60);
-                                        let date_str = chrono::DateTime::from_timestamp(session.start_time as i64, 0)
-                                            .map(|dt| dt.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string())
-                                            .unwrap_or_default();
-                                        ui.label(format!("{} {}", crate::i18n::t(&lang, "total_duration"), time_str));
-                                        if !date_str.is_empty() {
-                                            ui.label(egui::RichText::new(date_str).size(12.0).color(egui::Color32::GRAY));
-                                        }
-
-                                        if !session.sub_sessions.is_empty() {
-                                            ui.collapsing(format!("{} {}", session.sub_sessions.len(), crate::i18n::t(&lang, "sub_sessions")), |ui| {
-                                                for sub in &session.sub_sessions {
-                                                    let sub_secs = sub.end_time.saturating_sub(sub.start_time);
-                                                    let sub_time_str = format!("{:02}:{:02}:{:02}", sub_secs / 3600, (sub_secs % 3600) / 60, sub_secs % 60);
-                                                    ui.label(format!("- {}", sub_time_str));
+                                                    if ui
+                                                        .button("✏")
+                                                        .on_hover_text(crate::i18n::t(
+                                                            &lang,
+                                                            "edit_tooltip",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        self.editing_session_id = Some((
+                                                            proj_id.clone(),
+                                                            session.id.clone(),
+                                                        ));
+                                                        self.editing_session_name =
+                                                            session.name.clone();
+                                                    }
+                                                    if ui
+                                                        .button("🗑")
+                                                        .on_hover_text(crate::i18n::t(
+                                                            &lang,
+                                                            "delete_tooltip",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        self.deleting_session_id = Some((
+                                                            proj_id.clone(),
+                                                            session.id.clone(),
+                                                        ));
+                                                    }
                                                 }
                                             });
-                                        }
+
+                                            let total_secs = session.total_duration();
+
+                                            let time_str = format!(
+                                                "{:02}:{:02}:{:02}",
+                                                total_secs / 3600,
+                                                (total_secs % 3600) / 60,
+                                                total_secs % 60
+                                            );
+                                            let date_str = chrono::DateTime::from_timestamp(
+                                                session.start_time as i64,
+                                                0,
+                                            )
+                                            .map(|dt| {
+                                                dt.with_timezone(&chrono::Local)
+                                                    .format("%d/%m/%Y %H:%M")
+                                                    .to_string()
+                                            })
+                                            .unwrap_or_default();
+                                            ui.label(format!(
+                                                "{} {}",
+                                                crate::i18n::t(&lang, "total_duration"),
+                                                time_str
+                                            ));
+                                            if !date_str.is_empty() {
+                                                ui.label(
+                                                    egui::RichText::new(date_str)
+                                                        .size(12.0)
+                                                        .color(egui::Color32::GRAY),
+                                                );
+                                            }
+
+                                            if !session.sub_sessions.is_empty() {
+                                                ui.collapsing(
+                                                    format!(
+                                                        "{} {}",
+                                                        session.sub_sessions.len(),
+                                                        crate::i18n::t(&lang, "sub_sessions")
+                                                    ),
+                                                    |ui| {
+                                                        for sub in &session.sub_sessions {
+                                                            let sub_secs = sub
+                                                                .end_time
+                                                                .saturating_sub(sub.start_time);
+                                                            let sub_time_str = format!(
+                                                                "{:02}:{:02}:{:02}",
+                                                                sub_secs / 3600,
+                                                                (sub_secs % 3600) / 60,
+                                                                sub_secs % 60
+                                                            );
+                                                            ui.label(format!("- {}", sub_time_str));
+                                                        }
+                                                    },
+                                                );
+                                            }
+                                        });
                                     });
-                                });
+                                }
                             }
-                        }
-                    });
+                        });
 
                     if let Some((sid, new_name)) = session_to_save {
                         self.rename_session(&proj_id, &sid, new_name);
@@ -411,13 +552,15 @@ impl TimeTrackerState {
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("Excel Workbook", &["xlsx"])
                     .set_file_name("pendientes_export.xlsx")
-                    .save_file() {
+                    .save_file()
+            {
                 self.export_tasks_to_file(&path);
             }
             if ui.button(crate::i18n::t(&lang, "import_tasks")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("Excel Workbook", &["xlsx"])
-                    .pick_file() {
+                    .pick_file()
+            {
                 self.import_tasks_from_file(&path);
             }
         });
@@ -435,19 +578,43 @@ impl TimeTrackerState {
             ui.horizontal(|ui| {
                 ui.label(crate::i18n::t(&lang, "project_optional"));
                 egui::ComboBox::from_id_salt("proj_select")
-                    .selected_text(if self.new_task_project_input.is_empty() { crate::i18n::t(&lang, "none") } else { &self.new_task_project_input })
+                    .selected_text(if self.new_task_project_input.is_empty() {
+                        crate::i18n::t(&lang, "none")
+                    } else {
+                        &self.new_task_project_input
+                    })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.new_task_project_input, String::new(), crate::i18n::t(&lang, "none"));
+                        ui.selectable_value(
+                            &mut self.new_task_project_input,
+                            String::new(),
+                            crate::i18n::t(&lang, "none"),
+                        );
                         for proj in &self.data.projects {
-                            ui.selectable_value(&mut self.new_task_project_input, proj.id.clone(), &proj.name);
+                            ui.selectable_value(
+                                &mut self.new_task_project_input,
+                                proj.id.clone(),
+                                &proj.name,
+                            );
                         }
                     });
             });
             ui.horizontal(|ui| {
                 ui.label(crate::i18n::t(&lang, "priority"));
-                ui.radio_value(&mut self.new_task_priority, Priority::Alta, crate::i18n::t(&lang, "high"));
-                ui.radio_value(&mut self.new_task_priority, Priority::Media, crate::i18n::t(&lang, "medium"));
-                ui.radio_value(&mut self.new_task_priority, Priority::Baja, crate::i18n::t(&lang, "low"));
+                ui.radio_value(
+                    &mut self.new_task_priority,
+                    Priority::Alta,
+                    crate::i18n::t(&lang, "high"),
+                );
+                ui.radio_value(
+                    &mut self.new_task_priority,
+                    Priority::Media,
+                    crate::i18n::t(&lang, "medium"),
+                );
+                ui.radio_value(
+                    &mut self.new_task_priority,
+                    Priority::Baja,
+                    crate::i18n::t(&lang, "low"),
+                );
             });
             ui.horizontal(|ui| {
                 ui.label(crate::i18n::t(&lang, "tags_comma"));
@@ -465,22 +632,33 @@ impl TimeTrackerState {
                 self.create_task();
             }
             if let Some(ref err) = self.new_task_error {
-                ui.label(egui::RichText::new(err).color(egui::Color32::RED).size(12.0));
+                ui.label(
+                    egui::RichText::new(err)
+                        .color(egui::Color32::RED)
+                        .size(12.0),
+                );
             }
         });
 
         ui.add_space(20.0);
         ui.horizontal(|ui| {
             ui.heading(crate::i18n::t(&lang, "todo_list"));
-            ui.checkbox(&mut self.hide_completed_tasks, crate::i18n::t(&lang, "hide_completed"));
+            ui.checkbox(
+                &mut self.hide_completed_tasks,
+                crate::i18n::t(&lang, "hide_completed"),
+            );
         });
 
-        let task_ids: Vec<String> = self.data.tasks.iter()
-            .filter(|t| !self.hide_completed_tasks || !t.completed)
-            .map(|t| t.id.clone())
+        let visible: Vec<usize> = self
+            .data
+            .tasks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !self.hide_completed_tasks || !t.completed)
+            .map(|(i, _)| i)
             .collect();
 
-        if task_ids.is_empty() {
+        if visible.is_empty() {
             ui.label(crate::i18n::t(&lang, "empty_state_tasks"));
             return redirect_to_tracker;
         }
@@ -493,65 +671,79 @@ impl TimeTrackerState {
             .auto_shrink([false, false])
             .max_height(ui.available_height())
             .show(ui, |ui| {
-            for task_id in &task_ids {
-                let Some(task) = self.data.tasks.iter_mut().find(|t| &t.id == task_id) else { continue };
-                let task_id_clone = task.id.clone();
-                let task_name_clone = task.name.clone();
-                let task_proj_clone = task.project.clone();
-                let task_completed = task.completed;
-                let task_description = task.description.clone();
-                let task_priority = task.priority.clone();
-                let task_tags = task.tags.clone();
-                let task_deadline = task.deadline.clone();
+                for idx in &visible {
+                    let task = &self.data.tasks[*idx];
+                    let mut new_completed = task.completed;
+                    let mut clicked_delete = false;
+                    let mut clicked_work = false;
 
-                let mut new_completed = task_completed;
-                let mut clicked_delete = false;
-                let mut clicked_work = false;
-
-                ui.push_id(&task_id_clone, |ui| {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            if ui.checkbox(&mut new_completed, &task_name_clone).changed() {
-                                save_needed = true;
-                            }
-
-                            if ui.button("🗑").on_hover_text(crate::i18n::t(&lang, "delete_tooltip")).clicked() {
-                                clicked_delete = true;
-                            }
-
-                            if !new_completed
-                                && task_proj_clone.is_some()
-                                && ui.button(crate::i18n::t(&lang, "work_on_this")).clicked() {
-                                clicked_work = true;
-                            }
-                        });
-
-                        if !task_description.is_empty() {
+                    ui.push_id(task.id.as_str(), |ui| {
+                        ui.group(|ui| {
                             ui.horizontal(|ui| {
-                                ui.add_space(25.0);
-                                ui.label(&task_description);
+                                if ui.checkbox(&mut new_completed, &task.name).changed() {
+                                    save_needed = true;
+                                }
+
+                                if ui
+                                    .button("🗑")
+                                    .on_hover_text(crate::i18n::t(&lang, "delete_tooltip"))
+                                    .clicked()
+                                {
+                                    clicked_delete = true;
+                                }
+
+                                if !new_completed
+                                    && task.project.is_some()
+                                    && ui.button(crate::i18n::t(&lang, "work_on_this")).clicked()
+                                {
+                                    clicked_work = true;
+                                }
                             });
-                        }
-                        ui.horizontal(|ui| {
-                            let color = match task_priority { Priority::Alta => egui::Color32::RED, Priority::Media => egui::Color32::YELLOW, Priority::Baja => egui::Color32::GREEN };
-                            ui.label(egui::RichText::new(match task_priority { Priority::Alta => crate::i18n::t(&lang, "high"), Priority::Media => crate::i18n::t(&lang, "medium"), Priority::Baja => crate::i18n::t(&lang, "low") }).color(color));
-                            if !task_tags.is_empty() { ui.label(format!("🏷 {}", task_tags)); }
-                            if !task_deadline.is_empty() { ui.label(format!("📅 {}", task_deadline)); }
+
+                            if !task.description.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(25.0);
+                                    ui.label(&task.description);
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                let color = match &task.priority {
+                                    Priority::Alta => egui::Color32::RED,
+                                    Priority::Media => egui::Color32::YELLOW,
+                                    Priority::Baja => egui::Color32::GREEN,
+                                };
+                                ui.label(
+                                    egui::RichText::new(match &task.priority {
+                                        Priority::Alta => crate::i18n::t(&lang, "high"),
+                                        Priority::Media => crate::i18n::t(&lang, "medium"),
+                                        Priority::Baja => crate::i18n::t(&lang, "low"),
+                                    })
+                                    .color(color),
+                                );
+                                if !task.tags.is_empty() {
+                                    ui.label(format!("🏷 {}", task.tags));
+                                }
+                                if !task.deadline.is_empty() {
+                                    ui.label(format!("📅 {}", task.deadline));
+                                }
+                            });
                         });
                     });
-                });
 
-                if new_completed != task_completed {
-                    self.set_task_completed(task_id, new_completed);
+                    if new_completed != task.completed {
+                        let id = self.data.tasks[*idx].id.clone();
+                        self.set_task_completed(&id, new_completed);
+                    }
+                    if clicked_delete {
+                        to_delete = Some(self.data.tasks[*idx].id.clone());
+                    }
+                    if clicked_work
+                        && let Some(proj_id) = self.data.tasks[*idx].project.clone()
+                    {
+                        start_task_session = Some((proj_id, self.data.tasks[*idx].name.clone()));
+                    }
                 }
-                if clicked_delete {
-                    to_delete = Some(task_id_clone);
-                }
-                if clicked_work && let Some(proj_id) = task_proj_clone {
-                    start_task_session = Some((proj_id, task_name_clone));
-                }
-            }
-        });
+            });
 
         if let Some(id) = to_delete {
             self.delete_task(&id);
@@ -560,7 +752,8 @@ impl TimeTrackerState {
         }
 
         if let Some((proj_id, task_name)) = start_task_session
-            && self.start_task_session(proj_id, task_name) {
+            && self.start_task_session(proj_id, task_name)
+        {
             redirect_to_tracker = true;
         }
 
@@ -582,16 +775,43 @@ impl TimeTrackerState {
 
         ui.horizontal(|ui| {
             ui.group(|ui| {
-                ui.label(egui::RichText::new(crate::i18n::t(&lang, "today_total")).size(14.0).color(egui::Color32::GRAY));
-                ui.label(egui::RichText::new(format!("{:02}h {:02}m", today_hours, today_mins)).size(24.0).strong().color(egui::Color32::GREEN));
+                ui.label(
+                    egui::RichText::new(crate::i18n::t(&lang, "today_total"))
+                        .size(14.0)
+                        .color(egui::Color32::GRAY),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{:02}h {:02}m", today_hours, today_mins))
+                        .size(24.0)
+                        .strong()
+                        .color(egui::Color32::GREEN),
+                );
             });
             ui.group(|ui| {
-                ui.label(egui::RichText::new(crate::i18n::t(&lang, "total_all_time")).size(14.0).color(egui::Color32::GRAY));
-                ui.label(egui::RichText::new(format!("{:02}h {:02}m", total_hours, total_mins)).size(24.0).strong().color(egui::Color32::BLUE));
+                ui.label(
+                    egui::RichText::new(crate::i18n::t(&lang, "total_all_time"))
+                        .size(14.0)
+                        .color(egui::Color32::GRAY),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{:02}h {:02}m", total_hours, total_mins))
+                        .size(24.0)
+                        .strong()
+                        .color(egui::Color32::BLUE),
+                );
             });
             ui.group(|ui| {
-                ui.label(egui::RichText::new(crate::i18n::t(&lang, "total_sessions")).size(14.0).color(egui::Color32::GRAY));
-                ui.label(egui::RichText::new(format!("{}", total_sessions)).size(24.0).strong().color(egui::Color32::YELLOW));
+                ui.label(
+                    egui::RichText::new(crate::i18n::t(&lang, "total_sessions"))
+                        .size(14.0)
+                        .color(egui::Color32::GRAY),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{}", total_sessions))
+                        .size(24.0)
+                        .strong()
+                        .color(egui::Color32::YELLOW),
+                );
             });
         });
         ui.add_space(20.0);
@@ -616,7 +836,13 @@ impl TimeTrackerState {
             .show(ui, |plot_ui| plot_ui.bar_chart(chart));
     }
 
-    pub fn ui_settings(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, screen_tools: &ScreenTools, wayland: bool) -> bool {
+    pub fn ui_settings(
+        &mut self,
+        _ctx: &egui::Context,
+        ui: &mut egui::Ui,
+        screen_tools: &ScreenTools,
+        wayland: bool,
+    ) -> bool {
         let lang = self.data.language;
         ui.heading(crate::i18n::t(&lang, "settings"));
         ui.add_space(20.0);
@@ -625,12 +851,27 @@ impl TimeTrackerState {
         let mut durations_changed = false;
         ui.horizontal(|ui| {
             ui.label(crate::i18n::t(&lang, "deep_work_minutes"));
-            if ui.add(egui::Slider::new(&mut self.data.work_duration_mins, 1..=120)).changed() { changed = true; durations_changed = true; }
+            if ui
+                .add(egui::Slider::new(
+                    &mut self.data.work_duration_mins,
+                    1..=120,
+                ))
+                .changed()
+            {
+                changed = true;
+                durations_changed = true;
+            }
             ui.label(format!("{} min", self.data.work_duration_mins));
         });
         ui.horizontal(|ui| {
             ui.label(crate::i18n::t(&lang, "rest_minutes"));
-            if ui.add(egui::Slider::new(&mut self.data.rest_duration_mins, 1..=60)).changed() { changed = true; durations_changed = true; }
+            if ui
+                .add(egui::Slider::new(&mut self.data.rest_duration_mins, 1..=60))
+                .changed()
+            {
+                changed = true;
+                durations_changed = true;
+            }
             ui.label(format!("{} min", self.data.rest_duration_mins));
         });
 
@@ -639,30 +880,88 @@ impl TimeTrackerState {
 
         let has_dim = screen_tools.has_dim_support();
         let dim_response = ui.horizontal(|ui| {
-            ui.add_enabled(has_dim, egui::Checkbox::new(&mut self.data.screen_dim_during_rest, crate::i18n::t(&lang, "screen_dim_during_rest")))
+            ui.add_enabled(
+                has_dim,
+                egui::Checkbox::new(
+                    &mut self.data.screen_dim_during_rest,
+                    crate::i18n::t(&lang, "screen_dim_during_rest"),
+                ),
+            )
         });
-        if dim_response.inner.changed() && has_dim { changed = true; }
+        if dim_response.inner.changed() && has_dim {
+            changed = true;
+        }
         if !has_dim {
-            ui.label(egui::RichText::new(format!("  ⚠ {}", crate::i18n::t(&lang, "screen_not_available"))).color(egui::Color32::from_rgb(200, 150, 50)).size(12.0));
+            ui.label(
+                egui::RichText::new(format!(
+                    "  ⚠ {}",
+                    crate::i18n::t(&lang, "screen_not_available")
+                ))
+                .color(egui::Color32::from_rgb(200, 150, 50))
+                .size(12.0),
+            );
         } else {
-            let dim_tool = if screen_tools.has_brightnessctl() { "brightnessctl" } else { "xset" };
-            ui.label(egui::RichText::new(format!("  {}  ({})", crate::i18n::t(&lang, "screen_available"), dim_tool)).color(egui::Color32::from_rgb(100, 180, 100)).size(12.0));
+            let dim_tool = if screen_tools.has_brightnessctl() {
+                "brightnessctl"
+            } else {
+                "xset"
+            };
+            ui.label(
+                egui::RichText::new(format!(
+                    "  {}  ({})",
+                    crate::i18n::t(&lang, "screen_available"),
+                    dim_tool
+                ))
+                .color(egui::Color32::from_rgb(100, 180, 100))
+                .size(12.0),
+            );
         }
         if wayland && !screen_tools.has_brightnessctl() {
-            ui.label(egui::RichText::new(crate::i18n::t(&lang, "wayland_warning")).color(egui::Color32::from_rgb(220, 130, 50)).size(12.0));
+            ui.label(
+                egui::RichText::new(crate::i18n::t(&lang, "wayland_warning"))
+                    .color(egui::Color32::from_rgb(220, 130, 50))
+                    .size(12.0),
+            );
         }
 
         let has_lock = screen_tools.has_lock();
         let lock_response = ui.horizontal(|ui| {
-            ui.add_enabled(has_lock, egui::Checkbox::new(&mut self.data.screen_lock_during_rest, crate::i18n::t(&lang, "screen_lock_during_rest")))
+            ui.add_enabled(
+                has_lock,
+                egui::Checkbox::new(
+                    &mut self.data.screen_lock_during_rest,
+                    crate::i18n::t(&lang, "screen_lock_during_rest"),
+                ),
+            )
         });
-        if lock_response.inner.changed() && has_lock { changed = true; }
+        if lock_response.inner.changed() && has_lock {
+            changed = true;
+        }
         if !has_lock {
-            ui.label(egui::RichText::new(format!("  ⚠ {}", crate::i18n::t(&lang, "screen_not_available"))).color(egui::Color32::from_rgb(200, 150, 50)).size(12.0));
+            ui.label(
+                egui::RichText::new(format!(
+                    "  ⚠ {}",
+                    crate::i18n::t(&lang, "screen_not_available")
+                ))
+                .color(egui::Color32::from_rgb(200, 150, 50))
+                .size(12.0),
+            );
         } else {
-            let lock_tool = if screen_tools.has_lock() { "loginctl" } else { "" };
+            let lock_tool = if screen_tools.has_lock() {
+                "loginctl"
+            } else {
+                ""
+            };
             if !lock_tool.is_empty() {
-                ui.label(egui::RichText::new(format!("  {}  ({})", crate::i18n::t(&lang, "screen_available"), lock_tool)).color(egui::Color32::from_rgb(100, 180, 100)).size(12.0));
+                ui.label(
+                    egui::RichText::new(format!(
+                        "  {}  ({})",
+                        crate::i18n::t(&lang, "screen_available"),
+                        lock_tool
+                    ))
+                    .color(egui::Color32::from_rgb(100, 180, 100))
+                    .size(12.0),
+                );
             }
         }
 
@@ -701,8 +1000,14 @@ mod tests {
                     start_time: 100,
                     end_time: 200,
                     sub_sessions: vec![
-                        SubSession { start_time: 250, end_time: 300 },
-                        SubSession { start_time: 350, end_time: 300 },
+                        SubSession {
+                            start_time: 250,
+                            end_time: 300,
+                        },
+                        SubSession {
+                            start_time: 350,
+                            end_time: 300,
+                        },
                     ],
                 },
                 Session {
@@ -719,8 +1024,10 @@ mod tests {
 
     #[test]
     fn test_save_load_roundtrip() {
-        let mut data = TrackerData::default();
-        data.schema_version = 1;
+        let mut data = TrackerData {
+            schema_version: 1,
+            ..Default::default()
+        };
         data.projects.push(Project {
             id: "test-proj".into(),
             name: "Test Project".into(),
@@ -793,14 +1100,14 @@ mod tests {
         // Old JSON without screen fields must deserialize using serde(default) = false.
         let json = r#"{"language": "Es", "work_duration_mins": 90, "rest_duration_mins": 15}"#;
         let data: TrackerData = serde_json::from_str(json).unwrap();
-        assert_eq!(data.screen_dim_during_rest, false);
-        assert_eq!(data.screen_lock_during_rest, false);
+        assert!(!data.screen_dim_during_rest);
+        assert!(!data.screen_lock_during_rest);
 
         // Explicit values must be preserved.
         let json_explicit = r#"{"screen_dim_during_rest": true, "screen_lock_during_rest": true}"#;
         let data_explicit: TrackerData = serde_json::from_str(json_explicit).unwrap();
-        assert_eq!(data_explicit.screen_dim_during_rest, true);
-        assert_eq!(data_explicit.screen_lock_during_rest, true);
+        assert!(data_explicit.screen_dim_during_rest);
+        assert!(data_explicit.screen_lock_during_rest);
     }
 
     #[test]
@@ -817,7 +1124,9 @@ mod tests {
         assert!(target.exists());
         assert!(!tmp.exists());
 
-        let loaded = serde_json::from_str::<TrackerData>(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        let loaded =
+            serde_json::from_str::<TrackerData>(&std::fs::read_to_string(&target).unwrap())
+                .unwrap();
         assert_eq!(loaded.schema_version, 1);
 
         let _ = std::fs::remove_file(&target);
@@ -828,7 +1137,10 @@ mod tests {
         let _guard = DATA_PATH_LOCK.lock().unwrap();
         // Point the data path inside a regular file so the write must fail;
         // save() must log the error and return, never panic.
-        let blocker = std::env::temp_dir().join(format!("ultradian-save-test-blocker-{}", std::process::id()));
+        let blocker = std::env::temp_dir().join(format!(
+            "ultradian-save-test-blocker-{}",
+            std::process::id()
+        ));
         std::fs::write(&blocker, "x").expect("create blocker file");
         let data_path = blocker.join("tracker_data.json");
         unsafe {
@@ -845,7 +1157,11 @@ mod tests {
     #[test]
     fn test_active_session_serde_roundtrip() {
         let mut data = TrackerData::default();
-        data.projects.push(Project { id: "p1".into(), name: "P".into(), sessions: vec![] });
+        data.projects.push(Project {
+            id: "p1".into(),
+            name: "P".into(),
+            sessions: vec![],
+        });
         data.active_session = Some(ActiveSession {
             project_id: "p1".into(),
             session_name: "S".into(),

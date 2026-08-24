@@ -1,8 +1,8 @@
 use clap::Parser;
 use eframe::egui;
-use std::time::{Duration, Instant};
 use notify_rust::Notification;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 mod i18n;
 mod models;
@@ -41,7 +41,9 @@ enum AppView {
 
 fn exit_rest_viewport(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+        egui::WindowLevel::Normal,
+    ));
 }
 
 struct AppState {
@@ -63,8 +65,12 @@ struct AppState {
 impl AppState {
     fn new(work_mins: u64, rest_mins: u64) -> Self {
         let mut tracker = TimeTrackerState::load();
-        if tracker.data.work_duration_mins == 0 { tracker.data.work_duration_mins = work_mins; }
-        if tracker.data.rest_duration_mins == 0 { tracker.data.rest_duration_mins = rest_mins; }
+        if tracker.data.work_duration_mins == 0 {
+            tracker.data.work_duration_mins = work_mins;
+        }
+        if tracker.data.rest_duration_mins == 0 {
+            tracker.data.rest_duration_mins = rest_mins;
+        }
         let work_duration = Duration::from_secs(tracker.data.work_duration_mins * 60);
         let cycle_count = tracker.data.ultradian_cycles_completed;
 
@@ -89,20 +95,34 @@ impl AppState {
         self.work_pause_start = None;
     }
 
-    fn work_dur(&self) -> Duration { Duration::from_secs(self.tracker.data.work_duration_mins * 60) }
-    fn rest_dur(&self) -> Duration { Duration::from_secs(self.tracker.data.rest_duration_mins * 60) }
-    fn is_rest(&self) -> bool { self.ultradian_state == TimerState::Rest || self.ultradian_state == TimerState::PausedRest }
+    fn work_dur(&self) -> Duration {
+        Duration::from_secs(self.tracker.data.work_duration_mins * 60)
+    }
+    fn rest_dur(&self) -> Duration {
+        Duration::from_secs(self.tracker.data.rest_duration_mins * 60)
+    }
+    fn is_rest(&self) -> bool {
+        self.ultradian_state == TimerState::Rest || self.ultradian_state == TimerState::PausedRest
+    }
     fn notify(&self, title: &str, body: &str) {
         if let Err(e) = Notification::new().summary(title).body(body).show() {
             tracing::warn!(error = %e, "failed to show desktop notification");
         }
-        if let Err(e) = Command::new("paplay").arg("/usr/share/sounds/freedesktop/stereo/complete.oga").spawn() {
+        if let Err(e) = Command::new("paplay")
+            .arg("/usr/share/sounds/freedesktop/stereo/complete.oga")
+            .spawn()
+        {
             tracing::debug!(error = %e, "failed to play notification sound");
         }
     }
 
     fn today_total_secs(&self) -> u64 {
-        self.tracker.data.projects.iter().map(|p| p.today_duration_secs()).sum()
+        self.tracker
+            .data
+            .projects
+            .iter()
+            .map(|p| p.today_duration_secs())
+            .sum()
     }
 
     fn ultradian_toggle_pause(&mut self, ctx: &egui::Context) {
@@ -206,7 +226,11 @@ impl AppState {
 
     fn log_ultradian_session(&mut self) {
         // Actual non-paused work time of the phase: wall span minus paused time.
-        let work_secs = self.work_phase_start.elapsed().as_secs().saturating_sub(self.work_paused_secs);
+        let work_secs = self
+            .work_phase_start
+            .elapsed()
+            .as_secs()
+            .saturating_sub(self.work_paused_secs);
         let now = chrono::Local::now();
         let end = now.timestamp() as u64;
         let start = end.saturating_sub(work_secs);
@@ -226,11 +250,21 @@ impl AppState {
             id
         };
 
-        if let Some(proj) = self.tracker.data.projects.iter_mut().find(|p| p.id == project_id) {
+        if let Some(proj) = self
+            .tracker
+            .data
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project_id)
+        {
             let lang = self.tracker.data.language;
             proj.sessions.push(models::Session {
                 id: uuid::Uuid::new_v4().to_string(),
-                name: format!("{} {}", crate::i18n::t(&lang, "cycle_label"), self.cycle_count + 1),
+                name: format!(
+                    "{} {}",
+                    crate::i18n::t(&lang, "cycle_label"),
+                    self.cycle_count + 1
+                ),
                 start_time: start,
                 end_time: end,
                 sub_sessions: Vec::new(),
@@ -262,7 +296,9 @@ impl AppState {
                         self.ultradian_start = Instant::now();
                         self.breath_start = Instant::now();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
-                        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                            egui::WindowLevel::AlwaysOnTop,
+                        ));
                         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                         self.notify(
                             crate::i18n::t(&lang, "notification_rest_title"),
@@ -326,39 +362,88 @@ impl eframe::App for AppState {
         let frame_style = if is_rest {
             egui::Frame::default().fill(egui::Color32::BLACK)
         } else {
-            egui::Frame::default().fill(ctx.style_of(ctx.theme()).visuals.panel_fill).inner_margin(16.0)
+            egui::Frame::default()
+                .fill(ctx.style_of(ctx.theme()).visuals.panel_fill)
+                .inner_margin(16.0)
         };
 
         if !is_rest {
-            egui::Panel::top("top_panel").frame(egui::Frame::default().fill(egui::Color32::from_rgb(25, 30, 35)).inner_margin(8.0)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let lang = self.tracker.data.language;
-                    ui.selectable_value(&mut self.view, AppView::Ultradian, crate::i18n::t(&lang, "tab_ultradian"));
-                    ui.selectable_value(&mut self.view, AppView::Tracker, crate::i18n::t(&lang, "tab_tracker"));
-                    ui.selectable_value(&mut self.view, AppView::Tasks, crate::i18n::t(&lang, "tab_tasks"));
-                    ui.selectable_value(&mut self.view, AppView::Dashboard, crate::i18n::t(&lang, "tab_dashboard"));
-                    ui.selectable_value(&mut self.view, AppView::Settings, crate::i18n::t(&lang, "tab_settings"));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mut current_lang = self.tracker.data.language;
-                        egui::ComboBox::from_id_salt("lang_select").selected_text(match current_lang { crate::i18n::Language::En => "EN", crate::i18n::Language::Es => "ES" }).show_ui(ui, |ui| {
-                            ui.selectable_value(&mut current_lang, crate::i18n::Language::Es, "ES");
-                            ui.selectable_value(&mut current_lang, crate::i18n::Language::En, "EN");
+            egui::Panel::top("top_panel")
+                .frame(
+                    egui::Frame::default()
+                        .fill(egui::Color32::from_rgb(25, 30, 35))
+                        .inner_margin(8.0),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let lang = self.tracker.data.language;
+                        ui.selectable_value(
+                            &mut self.view,
+                            AppView::Ultradian,
+                            crate::i18n::t(&lang, "tab_ultradian"),
+                        );
+                        ui.selectable_value(
+                            &mut self.view,
+                            AppView::Tracker,
+                            crate::i18n::t(&lang, "tab_tracker"),
+                        );
+                        ui.selectable_value(
+                            &mut self.view,
+                            AppView::Tasks,
+                            crate::i18n::t(&lang, "tab_tasks"),
+                        );
+                        ui.selectable_value(
+                            &mut self.view,
+                            AppView::Dashboard,
+                            crate::i18n::t(&lang, "tab_dashboard"),
+                        );
+                        ui.selectable_value(
+                            &mut self.view,
+                            AppView::Settings,
+                            crate::i18n::t(&lang, "tab_settings"),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut current_lang = self.tracker.data.language;
+                            egui::ComboBox::from_id_salt("lang_select")
+                                .selected_text(match current_lang {
+                                    crate::i18n::Language::En => "EN",
+                                    crate::i18n::Language::Es => "ES",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut current_lang,
+                                        crate::i18n::Language::Es,
+                                        "ES",
+                                    );
+                                    ui.selectable_value(
+                                        &mut current_lang,
+                                        crate::i18n::Language::En,
+                                        "EN",
+                                    );
+                                });
+                            if current_lang != self.tracker.data.language {
+                                self.tracker.data.language = current_lang;
+                                self.tracker.save();
+                            }
                         });
-                        if current_lang != self.tracker.data.language { self.tracker.data.language = current_lang; self.tracker.save(); }
                     });
                 });
-            });
         }
 
-        egui::CentralPanel::default().frame(frame_style).show(ui, |ui| {
-            match self.view {
+        egui::CentralPanel::default()
+            .frame(frame_style)
+            .show(ui, |ui| match self.view {
                 AppView::Ultradian => self.ui_ultradian(&ctx, ui, is_rest),
                 AppView::Tracker => self.tracker.ui(&ctx, ui),
                 AppView::Dashboard => {
-                    self.tracker.ui_dashboard(&ctx, ui, &self.tracker.data.projects);
+                    self.tracker
+                        .ui_dashboard(&ctx, ui, &self.tracker.data.projects);
                 }
                 AppView::Settings => {
-                    if self.tracker.ui_settings(&ctx, ui, &self.screen_tools, screen::is_wayland()) {
+                    if self
+                        .tracker
+                        .ui_settings(&ctx, ui, &self.screen_tools, screen::is_wayland())
+                    {
                         self.ultradian_state = TimerState::Idle;
                         self.ultradian_remaining = self.work_dur();
                         self.ultradian_start = Instant::now();
@@ -376,8 +461,7 @@ impl eframe::App for AppState {
                         self.view = AppView::Tracker;
                     }
                 }
-            }
-        });
+            });
     }
 }
 
@@ -406,7 +490,11 @@ impl AppState {
             TimerState::Idle => self.work_dur().as_secs(),
         };
         let elapsed_secs = total_secs.saturating_sub(secs);
-        let progress = if total_secs > 0 { elapsed_secs as f32 / total_secs as f32 } else { 0.0 };
+        let progress = if total_secs > 0 {
+            elapsed_secs as f32 / total_secs as f32
+        } else {
+            0.0
+        };
 
         let today_secs = self.today_total_secs();
         let today_hours = today_secs / 3600;
@@ -440,7 +528,10 @@ impl AppState {
                         center,
                         breath_radius,
                         egui::Color32::from_rgba_premultiplied(0, 180, 180, 80),
-                        egui::Stroke::new(2.0, egui::Color32::from_rgba_premultiplied(255, 255, 255, 60)),
+                        egui::Stroke::new(
+                            2.0,
+                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 60),
+                        ),
                     );
 
                     ui.add_space(30.0);
@@ -484,25 +575,42 @@ impl AppState {
                     ui.add_space(30.0);
 
                     // Skip rest button
-                    if ui.add_sized([220.0, 44.0], egui::Button::new(
-                        egui::RichText::new(crate::i18n::t(&lang, "skip_rest"))
-                            .color(egui::Color32::LIGHT_GRAY)
-                            .size(18.0),
-                    )).clicked() {
+                    if ui
+                        .add_sized(
+                            [220.0, 44.0],
+                            egui::Button::new(
+                                egui::RichText::new(crate::i18n::t(&lang, "skip_rest"))
+                                    .color(egui::Color32::LIGHT_GRAY)
+                                    .size(18.0),
+                            ),
+                        )
+                        .clicked()
+                    {
                         self.skip_rest(ctx);
                     }
                     ui.add_space(10.0);
                     ui.label(
-                        egui::RichText::new(format!("[S] {}", crate::i18n::t(&lang, "skip_rest_shortcut")))
-                            .color(egui::Color32::from_gray(140))
-                            .size(14.0),
+                        egui::RichText::new(format!(
+                            "[S] {}",
+                            crate::i18n::t(&lang, "skip_rest_shortcut")
+                        ))
+                        .color(egui::Color32::from_gray(140))
+                        .size(14.0),
                     );
                 });
             } else {
                 let (status, color) = match self.ultradian_state {
-                    TimerState::Idle => (crate::i18n::t(&lang, "ultradian_idle"), egui::Color32::CYAN),
-                    TimerState::Work => (crate::i18n::t(&lang, "ultradian_work"), egui::Color32::GREEN),
-                    TimerState::PausedWork => (crate::i18n::t(&lang, "ultradian_paused"), egui::Color32::YELLOW),
+                    TimerState::Idle => {
+                        (crate::i18n::t(&lang, "ultradian_idle"), egui::Color32::CYAN)
+                    }
+                    TimerState::Work => (
+                        crate::i18n::t(&lang, "ultradian_work"),
+                        egui::Color32::GREEN,
+                    ),
+                    TimerState::PausedWork => (
+                        crate::i18n::t(&lang, "ultradian_paused"),
+                        egui::Color32::YELLOW,
+                    ),
                     _ => ("", egui::Color32::WHITE),
                 };
 
@@ -512,28 +620,53 @@ impl AppState {
                     ui.label(egui::RichText::new(status).color(color).size(30.0));
                     ui.add_space(10.0);
 
-                    ui.label(egui::RichText::new(format!("{} {}", crate::i18n::t(&lang, "cycle_label"), self.cycle_count + 1)).color(egui::Color32::GRAY).size(16.0));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} {}",
+                            crate::i18n::t(&lang, "cycle_label"),
+                            self.cycle_count + 1
+                        ))
+                        .color(egui::Color32::GRAY)
+                        .size(16.0),
+                    );
                     ui.add_space(10.0);
 
                     ui.label(egui::RichText::new(display).size(120.0).strong());
                     ui.add_space(20.0);
 
                     let bar_width = ui.available_width() * 0.6;
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(bar_width, 8.0), egui::Sense::hover());
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(bar_width, 8.0), egui::Sense::hover());
                     let bg_color = egui::Color32::from_gray(40);
-                    let fg_color = if self.ultradian_state == TimerState::Work { egui::Color32::GREEN } else { egui::Color32::BLUE };
+                    let fg_color = if self.ultradian_state == TimerState::Work {
+                        egui::Color32::GREEN
+                    } else {
+                        egui::Color32::BLUE
+                    };
                     ui.painter().rect_filled(rect, 4.0, bg_color);
                     let fill_width = rect.width() * progress;
                     if fill_width > 0.0 {
                         ui.painter().rect_filled(
-                            egui::Rect::from_min_size(rect.min, egui::vec2(fill_width, rect.height())),
+                            egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(fill_width, rect.height()),
+                            ),
                             4.0,
                             fg_color,
                         );
                     }
 
                     ui.add_space(10.0);
-                    ui.label(egui::RichText::new(format!("{}: {:02}h {:02}m", crate::i18n::t(&lang, "today_total"), today_hours, today_mins)).color(egui::Color32::GRAY).size(16.0));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{}: {:02}h {:02}m",
+                            crate::i18n::t(&lang, "today_total"),
+                            today_hours,
+                            today_mins
+                        ))
+                        .color(egui::Color32::GRAY)
+                        .size(16.0),
+                    );
                     ui.add_space(20.0);
 
                     let help_text = if self.ultradian_state == TimerState::Idle {
@@ -541,7 +674,11 @@ impl AppState {
                     } else {
                         crate::i18n::t(&lang, "ultradian_help_pause")
                     };
-                    ui.label(egui::RichText::new(help_text).color(egui::Color32::GRAY).size(20.0));
+                    ui.label(
+                        egui::RichText::new(help_text)
+                            .color(egui::Color32::GRAY)
+                            .size(20.0),
+                    );
                 });
             }
         });
@@ -552,11 +689,9 @@ impl AppState {
 /// (e.g. `RUST_LOG=debug ultradian-work`); defaults to `warn` so a GUI app
 /// stays quiet unless save or screen errors need attention.
 fn init_logging() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "warn".into());
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
 fn main() -> eframe::Result<()> {
@@ -574,9 +709,5 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
-        "Ultradian Work",
-        options,
-        Box::new(|_cc| Ok(Box::new(app))),
-    )
+    eframe::run_native("Ultradian Work", options, Box::new(|_cc| Ok(Box::new(app))))
 }

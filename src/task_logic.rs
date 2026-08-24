@@ -8,7 +8,8 @@ impl TimeTrackerState {
     pub(crate) fn create_task(&mut self) {
         self.new_task_error = None;
         if self.new_task_name.trim().is_empty() {
-            self.new_task_error = Some(crate::i18n::t(&self.data.language, "error_empty_name").to_string());
+            self.new_task_error =
+                Some(crate::i18n::t(&self.data.language, "error_empty_name").to_string());
             return;
         }
         self.data.tasks.push(Task {
@@ -16,7 +17,11 @@ impl TimeTrackerState {
             name: self.new_task_name.clone(),
             description: self.new_task_description.clone(),
             completed: false,
-            project: if self.new_task_project_input.is_empty() { None } else { Some(self.new_task_project_input.clone()) },
+            project: if self.new_task_project_input.is_empty() {
+                None
+            } else {
+                Some(self.new_task_project_input.clone())
+            },
             priority: self.new_task_priority.clone(),
             tags: self.new_task_tags.clone(),
             deadline: self.new_task_deadline.clone(),
@@ -28,62 +33,99 @@ impl TimeTrackerState {
         self.save();
     }
 
+    fn set_export_message(&mut self, message: String) {
+        self.export_message = Some(message);
+        self.export_message_time = Some(Instant::now());
+    }
+
     pub(crate) fn import_tasks_from_file(&mut self, path: &Path) {
         use calamine::{Reader, open_workbook_auto};
         let lang = self.data.language;
-        let Ok(mut workbook) = open_workbook_auto(path) else { 
-            self.export_message = Some(crate::i18n::t(&lang, "error_open_file").to_string());
-            self.export_message_time = Some(Instant::now());
+        let Ok(mut workbook) = open_workbook_auto(path) else {
+            self.set_export_message(crate::i18n::t(&lang, "error_open_file").to_string());
             return;
         };
-        let Ok(range) = workbook.worksheet_range("Pendientes") else { 
-            self.export_message = Some(crate::i18n::t(&lang, "sheet_not_found").to_string());
-            self.export_message_time = Some(Instant::now());
+        let Ok(range) = workbook.worksheet_range("Pendientes") else {
+            self.set_export_message(crate::i18n::t(&lang, "sheet_not_found").to_string());
             return;
         };
 
         let mut imported = 0;
         for (i, row) in range.rows().enumerate() {
-            if i == 0 { continue; }
-            if row.is_empty() || row.iter().all(|c| c.to_string().trim().is_empty()) { continue; }
+            if i == 0 {
+                continue;
+            }
+            if row.is_empty() || row.iter().all(|c| c.to_string().trim().is_empty()) {
+                continue;
+            }
 
-            let name = row.first().map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-            if name.is_empty() { continue; }
+            let name = row
+                .first()
+                .map(|c| c.to_string().trim().to_string())
+                .unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
 
-            let description = row.get(1).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+            let description = row
+                .get(1)
+                .map(|c| c.to_string().trim().to_string())
+                .unwrap_or_default();
 
-            let proj_name = row.get(2).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+            let proj_name = row
+                .get(2)
+                .map(|c| c.to_string().trim().to_string())
+                .unwrap_or_default();
             let project = if proj_name.is_empty() {
                 None
             } else {
-                if let Some(p) = self.data.projects.iter().find(|p| p.name.trim().to_lowercase() == proj_name.to_lowercase()) {
+                if let Some(p) = self
+                    .data
+                    .projects
+                    .iter()
+                    .find(|p| p.name.trim().to_lowercase() == proj_name.to_lowercase())
+                {
                     Some(p.id.clone())
                 } else {
                     let id = uuid::Uuid::new_v4().to_string();
                     self.data.projects.push(Project {
                         id: id.clone(),
                         name: proj_name.clone(),
-                        sessions: Vec::new()
+                        sessions: Vec::new(),
                     });
                     Some(id)
                 }
             };
 
-            if self.data.tasks.iter().any(|t| t.name.trim().to_lowercase() == name.to_lowercase() && t.project == project) {
+            if self.data.tasks.iter().any(|t| {
+                t.name.trim().to_lowercase() == name.to_lowercase() && t.project == project
+            }) {
                 continue;
             }
 
-            let completed_str = row.get(3).map(|c| c.to_string().trim().to_lowercase()).unwrap_or_default();
+            let completed_str = row
+                .get(3)
+                .map(|c| c.to_string().trim().to_lowercase())
+                .unwrap_or_default();
             let completed = matches!(completed_str.as_str(), "true" | "si" | "1" | "yes");
-            let priority_str = row.get(4).map(|c| c.to_string().trim().to_lowercase()).unwrap_or_default();
+            let priority_str = row
+                .get(4)
+                .map(|c| c.to_string().trim().to_lowercase())
+                .unwrap_or_default();
             let priority = match priority_str.as_str() {
                 "alta" | "high" => Priority::Alta,
                 "media" | "medium" => Priority::Media,
                 "baja" | "low" => Priority::Baja,
                 _ => Priority::Media,
             };
-            let tags = row.get(5).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-            let deadline = row.get(6).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
+            let tags = row
+                .get(5)
+                .map(|c| c.to_string().trim().to_string())
+                .unwrap_or_default();
+            let deadline = row
+                .get(6)
+                .map(|c| c.to_string().trim().to_string())
+                .unwrap_or_default();
 
             self.data.tasks.push(Task {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -98,8 +140,11 @@ impl TimeTrackerState {
             imported += 1;
         }
         self.save();
-        self.export_message = Some(format!("{} {}", imported, crate::i18n::t(&lang, "imported_tasks")));
-        self.export_message_time = Some(Instant::now());
+        self.set_export_message(format!(
+            "{} {}",
+            imported,
+            crate::i18n::t(&lang, "imported_tasks")
+        ));
     }
 
     pub(crate) fn export_tasks_to_file(&mut self, path: &Path) {
@@ -120,25 +165,37 @@ impl TimeTrackerState {
                 let _ = worksheet.write_string(row, 1, &task.description);
 
                 let proj_name = if let Some(pid) = &task.project {
-                    self.data.projects.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_default()
+                    self.data
+                        .projects
+                        .iter()
+                        .find(|p| p.id == *pid)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default()
                 } else {
                     String::new()
                 };
                 let _ = worksheet.write_string(row, 2, &proj_name);
 
-                let _ = worksheet.write_string(row, 3, if task.completed { "true" } else { "false" });
-                let prio_str = match task.priority { Priority::Alta => "Alta", Priority::Media => "Media", Priority::Baja => "Baja" };
+                let _ =
+                    worksheet.write_string(row, 3, if task.completed { "true" } else { "false" });
+                let prio_str = match task.priority {
+                    Priority::Alta => "Alta",
+                    Priority::Media => "Media",
+                    Priority::Baja => "Baja",
+                };
                 let _ = worksheet.write_string(row, 4, prio_str);
                 let _ = worksheet.write_string(row, 5, &task.tags);
                 let _ = worksheet.write_string(row, 6, &task.deadline);
             }
 
             if workbook.save(path).is_ok() {
-                self.export_message = Some(format!("{} {}", crate::i18n::t(&lang, "exported_to"), path.display()));
-                self.export_message_time = Some(Instant::now());
+                self.set_export_message(format!(
+                    "{} {}",
+                    crate::i18n::t(&lang, "exported_to"),
+                    path.display()
+                ));
             } else {
-                self.export_message = Some(crate::i18n::t(&lang, "error_export").to_string());
-                self.export_message_time = Some(Instant::now());
+                self.set_export_message(crate::i18n::t(&lang, "error_export").to_string());
             }
         }
     }
@@ -185,7 +242,7 @@ mod tests {
     fn test_export_import_tasks() {
         let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
-        let export_path = temp_dir.join("test_export.xlsx");
+        let export_path = temp_dir.join(format!("test_export_{}.xlsx", std::process::id()));
         let data_path = temp_dir.join("test_tracker_data.json");
 
         unsafe {
@@ -220,7 +277,7 @@ mod tests {
         let imported = &new_state.data.tasks[0];
         assert_eq!(imported.name, "Test Task");
         assert_eq!(imported.description, "Description");
-        assert_eq!(imported.completed, false);
+        assert!(!imported.completed);
 
         let _ = std::fs::remove_file(&export_path);
     }
@@ -230,7 +287,10 @@ mod tests {
         let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
         let export_path = temp_dir.join(format!("test_roundtrip_{}.xlsx", std::process::id()));
-        let data_path = temp_dir.join(format!("test_tracker_data_roundtrip_{}.json", std::process::id()));
+        let data_path = temp_dir.join(format!(
+            "test_tracker_data_roundtrip_{}.json",
+            std::process::id()
+        ));
 
         unsafe {
             std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
@@ -239,7 +299,11 @@ mod tests {
         let _ = std::fs::remove_file(&data_path);
 
         let mut state = TimeTrackerState::load();
-        state.data.projects.push(Project { id: "proj-1".into(), name: "Mi Proyecto".into(), sessions: Vec::new() });
+        state.data.projects.push(Project {
+            id: "proj-1".into(),
+            name: "Mi Proyecto".into(),
+            sessions: Vec::new(),
+        });
         state.data.tasks.push(Task {
             id: "t1".into(),
             name: "Con proyecto".into(),
@@ -269,14 +333,26 @@ mod tests {
         fresh.import_tasks_from_file(&export_path);
 
         assert_eq!(fresh.data.tasks.len(), 2);
-        let by_name = |n: &str| fresh.data.tasks.iter().find(|t| t.name == n).unwrap_or_else(|| panic!("task {n} missing"));
+        let by_name = |n: &str| {
+            fresh
+                .data
+                .tasks
+                .iter()
+                .find(|t| t.name == n)
+                .unwrap_or_else(|| panic!("task {n} missing"))
+        };
         let t1 = by_name("Con proyecto");
         assert_eq!(t1.description, "Desc con espacios");
         assert!(t1.completed);
         assert_eq!(t1.priority, Priority::Alta);
         assert_eq!(t1.tags, "tag1, tag2");
         assert_eq!(t1.deadline, "2026-12-31");
-        let proj = fresh.data.projects.iter().find(|p| p.id == t1.project.as_deref().expect("project id")).expect("project recreated");
+        let proj = fresh
+            .data
+            .projects
+            .iter()
+            .find(|p| p.id == t1.project.as_deref().expect("project id"))
+            .expect("project recreated");
         assert_eq!(proj.name, "Mi Proyecto");
 
         let t2 = by_name("Sin proyecto");
@@ -292,8 +368,8 @@ mod tests {
     fn test_import_priority_is_case_insensitive() {
         let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
-        let xlsx_path = temp_dir.join("test_import_priority.xlsx");
-        let data_path = temp_dir.join("test_tracker_data_priority.json");
+        let xlsx_path = temp_dir.join(format!("test_import_priority_{}.xlsx", std::process::id()));
+        let data_path = temp_dir.join(format!("test_tracker_data_priority_{}.json", std::process::id()));
         unsafe {
             std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
         }
@@ -301,11 +377,33 @@ mod tests {
         let _ = std::fs::remove_file(&data_path);
 
         let mut workbook = rust_xlsxwriter::Workbook::new();
-        let worksheet = workbook.add_worksheet().set_name("Pendientes").expect("create Pendientes worksheet");
-        for (i, header) in ["Nombre", "Descripcion", "Proyecto", "Completado", "Prioridad", "Tags", "Fecha limite"].into_iter().enumerate() {
+        let worksheet = workbook
+            .add_worksheet()
+            .set_name("Pendientes")
+            .expect("create Pendientes worksheet");
+        for (i, header) in [
+            "Nombre",
+            "Descripcion",
+            "Proyecto",
+            "Completado",
+            "Prioridad",
+            "Tags",
+            "Fecha limite",
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let _ = worksheet.write_string(0, i as u16, header);
         }
-        for (r, (name, priority)) in [("T Alta", "High"), ("T Media", "medium"), ("T Baja", "Baja"), ("T Typo", "Urgente")].into_iter().enumerate() {
+        for (r, (name, priority)) in [
+            ("T Alta", "High"),
+            ("T Media", "medium"),
+            ("T Baja", "Baja"),
+            ("T Typo", "Urgente"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let row = (r + 1) as u32;
             let _ = worksheet.write_string(row, 0, name);
             let _ = worksheet.write_string(row, 3, "false");
@@ -318,7 +416,16 @@ mod tests {
         state.import_tasks_from_file(&xlsx_path);
 
         assert_eq!(state.data.tasks.len(), 4);
-        let priority_of = |name: &str| state.data.tasks.iter().find(|t| t.name == name).unwrap().priority.clone();
+        let priority_of = |name: &str| {
+            state
+                .data
+                .tasks
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap()
+                .priority
+                .clone()
+        };
         assert_eq!(priority_of("T Alta"), Priority::Alta);
         assert_eq!(priority_of("T Media"), Priority::Media);
         assert_eq!(priority_of("T Baja"), Priority::Baja);
