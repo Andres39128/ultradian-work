@@ -226,6 +226,69 @@ mod tests {
     }
 
     #[test]
+    fn test_export_import_roundtrip_preserves_all_fields() {
+        let _guard = DATA_PATH_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir();
+        let export_path = temp_dir.join(format!("test_roundtrip_{}.xlsx", std::process::id()));
+        let data_path = temp_dir.join(format!("test_tracker_data_roundtrip_{}.json", std::process::id()));
+
+        unsafe {
+            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
+        }
+        let _ = std::fs::remove_file(&export_path);
+        let _ = std::fs::remove_file(&data_path);
+
+        let mut state = TimeTrackerState::load();
+        state.data.projects.push(Project { id: "proj-1".into(), name: "Mi Proyecto".into(), sessions: Vec::new() });
+        state.data.tasks.push(Task {
+            id: "t1".into(),
+            name: "Con proyecto".into(),
+            description: "Desc con espacios".into(),
+            project: Some("proj-1".into()),
+            completed: true,
+            priority: Priority::Alta,
+            tags: "tag1, tag2".into(),
+            deadline: "2026-12-31".into(),
+        });
+        state.data.tasks.push(Task {
+            id: "t2".into(),
+            name: "Sin proyecto".into(),
+            description: String::new(),
+            project: None,
+            completed: false,
+            priority: Priority::Baja,
+            tags: String::new(),
+            deadline: String::new(),
+        });
+        state.export_tasks_to_file(&export_path);
+
+        // Fresh state without projects or tasks: import must rebuild everything from the sheet.
+        let mut fresh = TimeTrackerState::load();
+        fresh.data.projects.clear();
+        fresh.data.tasks.clear();
+        fresh.import_tasks_from_file(&export_path);
+
+        assert_eq!(fresh.data.tasks.len(), 2);
+        let by_name = |n: &str| fresh.data.tasks.iter().find(|t| t.name == n).unwrap_or_else(|| panic!("task {n} missing"));
+        let t1 = by_name("Con proyecto");
+        assert_eq!(t1.description, "Desc con espacios");
+        assert!(t1.completed);
+        assert_eq!(t1.priority, Priority::Alta);
+        assert_eq!(t1.tags, "tag1, tag2");
+        assert_eq!(t1.deadline, "2026-12-31");
+        let proj = fresh.data.projects.iter().find(|p| p.id == t1.project.as_deref().expect("project id")).expect("project recreated");
+        assert_eq!(proj.name, "Mi Proyecto");
+
+        let t2 = by_name("Sin proyecto");
+        assert!(!t2.completed);
+        assert_eq!(t2.priority, Priority::Baja);
+        assert_eq!(t2.project, None);
+
+        let _ = std::fs::remove_file(&export_path);
+        let _ = std::fs::remove_file(&data_path);
+    }
+
+    #[test]
     fn test_import_priority_is_case_insensitive() {
         let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
