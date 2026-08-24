@@ -103,7 +103,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | C6 | Tripleto Fullscreen/WindowLevel x3 | **ABIERTO** | `main.rs:158-159`, `:240-241`, `:323-324` → helper `exit_rest_viewport(ctx)` |
 | C7 | Dead code en screen.rs | **PARCIAL** | Wrappers `get_saved_brightness`/`save_brightness` siguen muertos (`screen.rs:224-232`); los tests usan las funciones privadas directamente |
 | C8 | Sentinel "handled" | **ABIERTO** | `tracker.rs:486-490` |
-| C9 | Tests de validacion falsos | **ABIERTO** | `test_create_task_validates_name` / `test_create_project_validates_name` prueban copias locales, no `create_task()`/`add_project()` |
+| C9 | Tests de validacion falsos | **ARREGLADO** | Tests reescritos para llamar a `create_task()`/`add_project()` reales con `ULTRADIANT_DATA_PATH` inyectado; lock de mutex serializa los tests que mutan la env var (race detectado al agregarlos) |
 | C10 | Nombre fijo test_export.xlsx | **ABIERTO** | `tracker.rs:970` (riesgo de colision entre runs) |
 | C11 | Clippy en tests | **ABIERTO** | 6 warnings confirmados hoy (ver arriba) |
 | C12 | Ruta fija /tmp para brillo | **ABIERTO** | `screen.rs:5` (symlink-able; archivo stale si crash con `kill -9` impide restore en el siguiente arranque, ver N13-contexto) |
@@ -123,7 +123,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | PROD-004 (scripts muertos) | ARREGLADO |
 | PROD-005 (strings hardcodeados) | ARREGLADO (ver C1, resuelto 2026-08-23) |
 | PROD-006 (schema version) | PARCIAL (campo + tests; sin migracion) |
-| PROD-007 (pocos tests) | MEJORADO: 18 tests, todos seguros de correr; quedan 2 falsos (C9) |
+| PROD-007 (pocos tests) | ARREGLADO: 24 tests, todos seguros de correr (C9 resuelto: los tests de validacion ahora llaman a los metodos reales) |
 | PROD-008 (.gitignore) | ARREGLADO |
 | PROD-009 (install.sh prereqs) | ARREGLADO (ver C15) |
 | PROD-010 (sin logging estructurado) | ABIERTO (solo `eprintln!`) |
@@ -169,7 +169,7 @@ Binario release: 20 MB (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~
 - ~~**B1**~~ — persistir sesion en curso — **resuelto** (ver tabla de estado)
 - ~~**C1 + C2**~~ — i18n de los 12 strings restantes y borrar 7 keys muertas — **resuelto** en `576ae29` (mismo commit)
 - ~~**N5/N6/N7/N8/N9**~~ — paquete de fixes pequenos — **resuelto** el 2026-08-23 (N5: unlock al pausar Rest / lock al reanudar y al restart; N6: la sesion logueada usa el trabajo real no pausado, no la configuracion; N7: clamp del spacer negativo; N8: defaults de serde = 90/15, consistentes con `Default`; N9: prioridad de import case-insensitive)
-- **C9** — reescribir los 2 tests falsos para llamar a `create_task()`/`add_project()` reales (inyectando el data path, que ya existe)
+- ~~**C9**~~ — reescribir los 2 tests falsos para llamar a `create_task()`/`add_project()` reales — **resuelto** en `4e0498d` (data path inyectado + lock contra race de env var entre tests)
 - Actualizar `eframe`+`egui_plot` a 0.36/0.37 en commit dedicado; `cargo audit`
 
 **Mediano plazo (deuda estructural):**
