@@ -88,7 +88,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | A3 | Test apaga pantalla/bloquea sesion | **ARRELLADO** | Early-return `cfg!(test)` en `dim/restore/lock/unlock` (`screen.rs:89,132,173,200`); el test pasa seguro |
 | A4 | Tests destruyen datos reales | **ARREGLADO** | `ULTRADIANT_DATA_PATH` respetada (`tracker.rs:41-44`); test apunta a temp (`:971-975`) |
 | A5 | Sin unlock al terminar descanso | **ARREGLADO** | `unlock_screen()` existe (`screen.rs:199-220`) y se invoca en skip (`main.rs:152-154`), fin de rest (`:245-247`), reset de settings (`:320-322`) y Ctrl+C (`screen.rs:76`) |
-| A6 | Roundtrip Excel roto | **PARCIAL** | Errores de import ahora visibles (`tracker.rs:707-716`); completed acepta `true/si/1/yes` (`:750`); roundtrip Alta/Media/Baja consistente. Queda N9 (case-sensitivity) y headers en espanol |
+| A6 | Roundtrip Excel roto | **ARREGLADO** (2026-08-23) | Errores de import visibles; completed acepta `true/si/1/yes`; prioridad case-insensitive (N9 resuelto); el parse es por posicion (los headers i18n de C1 no afectan el roundtrip; sheet "Pendientes" y valores Alta/Media/Baja canonicos por decision). Test nuevo `test_export_import_roundtrip_preserves_all_fields` verifica export→import con estado fresco: nombre, descripcion, proyecto (recreado por nombre), completed, prioridad, tags y deadline |
 | B1 | Sesion en curso no persiste | **ARREGLADO** | `ActiveSession` (proyecto, nombre, parent, tracking, `start_unix`, acumulados) serializada en `TrackerData` (`models.rs`); `save()` sincroniza el estado en memoria antes de escribir y `load()` restaura plegando el tiempo transcurrido desde `start_unix`; se guarda en start/pause/finish/continue/work-on-task; refs colgantes se limpian al borrar proyecto/padre |
 | B2 | Midnight en today_duration | **ARREGLADO** | Clipping de solapamiento para sesion padre y subs (`models.rs:110-116`) |
 | B3 | Sin eliminar proyectos | **ARREGLADO** | `deleting_project_id` + confirm window (`tracker.rs:265-298`) — pero con el bug N1 |
@@ -101,7 +101,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | C4 | Expresion total_secs x3 | **ABIERTO** | Duplicada en `tracker.rs:216-217` y `:422-423` aunque `Project::total_duration` existe (`models.rs:93-101`) |
 | C5 | Bloque export_message x2 | **ABIERTO** | Identico en `tracker.rs:321-328` y `:523-530` |
 | C6 | Tripleto Fullscreen/WindowLevel x3 | **ABIERTO** | `main.rs:158-159`, `:240-241`, `:323-324` → helper `exit_rest_viewport(ctx)` |
-| C7 | Dead code en screen.rs | **PARCIAL** | Wrappers `get_saved_brightness`/`save_brightness` siguen muertos (`screen.rs:224-232`); los tests usan las funciones privadas directamente |
+| C7 | Dead code en screen.rs | **ARREGLADO** (2026-08-23) | Borrados los wrappers pub muertos `get_saved_brightness`/`save_brightness` y sus `#[allow(dead_code)]`; `restore_screen` ahora usa `get_saved_brightness_from` (el helper paso a tener uso productivo); `save_brightness_to` ya era usado por `dim_screen` |
 | C8 | Sentinel "handled" | **ARREGLADO** (2026-08-23, junto a PROD-002: el dance de `session_to_delete` se reemplazo por limpiar `deleting_session_id` directo al confirmar/cancelar) | `tracker.rs:486-490` |
 | C9 | Tests de validacion falsos | **ARREGLADO** | Tests reescritos para llamar a `create_task()`/`add_project()` reales con `ULTRADIANT_DATA_PATH` inyectado; lock de mutex serializa los tests que mutan la env var (race detectado al agregarlos) |
 | C10 | Nombre fijo test_export.xlsx | **ABIERTO** | `tracker.rs:970` (riesgo de colision entre runs) |
@@ -111,7 +111,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | C14 | README con placeholder | **ARREGLADO** (2026-08-23) | URL real `https://github.com/Andres39128/ultradian-work`; secciones nuevas: atajos (Espacio/R/S), opciones CLI (`--work`/`--rest`), dim/lock con tools y deps opcionales |
 | C15 | install.sh sin prerequisitos | **ARREGLADO** | `check_prerequisites` verifica cargo/rustc + avisa de deps opcionales (`install.sh:26-49`) |
 
-**Resumen: 19 arreglados, 2 parciales, 6 abiertos** (de 27).
+**Resumen: 21 arreglados, 0 parciales, 6 abiertos** (de 27).
 
 ## Estado de hallazgos de la auditoria 2026-05-11 (PROD)
 
