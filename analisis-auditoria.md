@@ -106,12 +106,12 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | C9 | Tests de validacion falsos | **ARREGLADO** | Tests reescritos para llamar a `create_task()`/`add_project()` reales con `ULTRADIANT_DATA_PATH` inyectado; lock de mutex serializa los tests que mutan la env var (race detectado al agregarlos) |
 | C10 | Nombre fijo test_export.xlsx | **ABIERTO** | `tracker.rs:970` (riesgo de colision entre runs) |
 | C11 | Clippy en tests | **ABIERTO** | 6 warnings confirmados hoy (ver arriba) |
-| C12 | Ruta fija /tmp para brillo | **ABIERTO** | `screen.rs:5` (symlink-able; archivo stale si crash con `kill -9` impide restore en el siguiente arranque, ver N13-contexto) |
-| C13 | Multi-monitor brightnessctl | **ABIERTO** | `screen.rs:98` toma el stdout completo (2 lineas con 2 monitores) → restore falla |
-| C14 | README con placeholder | **ABIERTO** | `README.md:22` sigue con `tu-usuario`; tampoco documenta dim/lock ni shortcuts |
+| C12 | Ruta fija /tmp para brillo | **ARREGLADO** (2026-08-23) | El nivel de brillo se guarda en la data dir del proyecto (`TimeTrackerState::data_dir()/brightness`, junto a `tracker_data.json`); `save_brightness_to` crea el directorio y reporta el error via tracing. Queda: archivo stale tras `kill -9` (no en el alcance de este fix) |
+| C13 | Multi-monitor brightnessctl | **ARREGLADO** (2026-08-23) | `parse_brightness_output()` toma la primera linea no vacia de `brightnessctl g` y quita la anotacion de dispositivo (`74% [backlight]` → `74%`); `brightnessctl s` sin `-d` apunta al mismo dispositivo default. 5 tests nuevos |
+| C14 | README con placeholder | **ARREGLADO** (2026-08-23) | URL real `https://github.com/Andres39128/ultradian-work`; secciones nuevas: atajos (Espacio/R/S), opciones CLI (`--work`/`--rest`), dim/lock con tools y deps opcionales |
 | C15 | install.sh sin prerequisitos | **ARREGLADO** | `check_prerequisites` verifica cargo/rustc + avisa de deps opcionales (`install.sh:26-49`) |
 
-**Resumen: 16 arreglados, 2 parciales, 9 abiertos** (de 27).
+**Resumen: 19 arreglados, 2 parciales, 6 abiertos** (de 27).
 
 ## Estado de hallazgos de la auditoria 2026-05-11 (PROD)
 
@@ -126,7 +126,7 @@ Lectura completa de las 5 fuentes (2333/2333 lineas), `Cargo.toml`/`Cargo.lock` 
 | PROD-007 (pocos tests) | ARREGLADO: 24 tests, todos seguros de correr (C9 resuelto: los tests de validacion ahora llaman a los metodos reales) |
 | PROD-008 (.gitignore) | ARREGLADO |
 | PROD-009 (install.sh prereqs) | ARREGLADO (ver C15) |
-| PROD-010 (sin logging estructurado) | ABIERTO (solo `eprintln!`) |
+| PROD-010 (sin logging estructurado) | **ARREGLADO** (2026-08-23): `tracing` + `tracing-subscriber` (feature `env-filter`); init en `main()` con default `RUST_LOG=warn`; los 11 `eprintln!` reemplazados por eventos estructurados (errores de save/load = `error!` con campos `path`+`error`, degradacion de pantalla/notificaciones = `warn!`, sonido y save exitoso = `debug!`, key i18n desconocida = `warn!` en builds debug) |
 | PROD-011 (repaint continuo) | ARREGLADO |
 | PROD-012 (paplay sin validacion) | ABIERTO (`main.rs:75` ruta hardcodeada, error ignorado) |
 | PROD-013 (i18n no escalable) | **ARREGLADO** (2026-08-23): const `TRANSLATIONS: &[(&str, &str, &str)]` (key, en, es) + `t()` con busqueda lineal; API `t(&Language, &str)` sin cambios, agregar un idioma = ampliar el tuple |
@@ -158,7 +158,7 @@ Actualizado 2026-08-23: `eframe` 0.33.3→**0.36.1** + `egui_plot` 0.34.1→**0.
 | `src/i18n.rs` | 185 | 6% | Const tabla (key, en, es) + `t()` lineal; 3 tests (no-empty, keys unicas, unknown key) |
 | `src/models.rs` | 121 | 5% | Limpio, con metodos de dominio (`total_duration`, `today_duration_secs`) |
 
-Binario release: 29 MB con eframe 0.36 (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~20-30%).
+Binario release: 31 MB con eframe 0.36 + tracing (eframe/wgpu; `RUSTFLAGS="-C strip=symbols"` lo recorta ~20-30%).
 
 ## Priorizacion sugerida
 
@@ -179,6 +179,6 @@ Binario release: 29 MB con eframe 0.36 (eframe/wgpu; `RUSTFLAGS="-C strip=symbol
 **Mediano plazo (deuda estructural):**
 - ~~**PROD-002**~~ — partir `tracker.rs`: extraer logica de sesion/tareas a `session_logic.rs`/`task_logic.rs` (puras, sin egui) y dejar solo render en `tracker.rs`; habilita testear logica sin UI — **resuelto** el 2026-08-23 (30 tests; la persistencia `load`/`save` quedo en `tracker.rs` junto al estado; como efecto colateral se cerro C8: el sentinel `"handled"` desaparecio)
 - ~~**PROD-013**~~ — i18n con const arrays en lugar de match gigante — **resuelto** el 2026-08-23: `TRANSLATIONS: &[(&str, &str, &str)]` (key, en, es); `t()` busca linealmente y mantiene la API; agregar idioma = ampliar el tuple; efecto colateral cerro C3 (debug log de key desconocida)
-- **PROD-010** — logging con `tracing` (hoy `eprintln!`), especialmente errores de save
-- **C12/C13** — brightness en data dir del proyecto + parse por linea de `brightnessctl g`
-- **C14** — README: URL real + seccion de shortcuts/dim/lock
+- ~~**PROD-010**~~ — logging con `tracing` (hoy `eprintln!`), especialmente errores de save — **resuelto** el 2026-08-23 (`tracing` + `tracing-subscriber` con env-filter; errores de save ahora `error!` con `path`+`error`; default `RUST_LOG=warn`)
+- ~~**C12/C13**~~ — brightness en data dir del proyecto + parse por linea de `brightnessctl g` — **resuelto** el 2026-08-23 (`brightness` en la data dir junto a `tracker_data.json`; `parse_brightness_output()` con 5 tests)
+- ~~**C14**~~ — README: URL real + seccion de shortcuts/dim/lock — **resuelto** el 2026-08-23 (URL `Andres39128/ultradian-work`; secciones de atajos, CLI y dim/lock)

@@ -19,7 +19,7 @@ Asegúrate de tener instalados `rust` y `cargo` en tu sistema.
 
 1. Clona el repositorio:
    ```bash
-   git clone https://github.com/tu-usuario/ultradian-work.git
+   git clone https://github.com/Andres39128/ultradian-work.git
    cd ultradian-work
    ```
 
@@ -42,9 +42,38 @@ Una vez instalado mediante el script, puedes lanzar la aplicación de las siguie
 
 - **Interfaz Gráfica:** Busca **"Ultradian Work"** en el menú principal/lanzador de aplicaciones de tu entorno de escritorio Linux.
 - **Terminal:** Ejecuta el comando:
-  ```bash
-  ultradian-work
-  ```
+   ```bash
+   ultradian-work
+   ```
+
+### Opciones de línea de comandos
+
+```bash
+ultradian-work --work 90 --rest 15   # duración inicial de trabajo/descanso en minutos
+```
+
+## Atajos de teclado
+
+Disponibles en la pestaña **Ultradian Timer** (mientras no tengas un campo de texto enfocado):
+
+| Tecla | Acción |
+|---|---|
+| `Espacio` | Pausar / reanudar la fase actual |
+| `R` | Reiniciar la fase actual (trabajo o descanso) |
+| `S` | Saltar el descanso y volver al trabajo (solo durante el descanso) |
+
+## Dim y bloqueo de pantalla durante el descanso
+
+En **Configuración → Screen** puedes activar dos comportamientos para el descanso:
+
+- **Reducir brillo durante descanso:** guarda el brillo actual y lo baja al 5%, restaurándolo al terminar el descanso (o al pausar/saltarlo).
+  - Usa `brightnessctl` si está instalado (recomendado; funciona en Wayland); si no, cae a `xset dpms force off` (solo X11).
+- **Bloquear pantalla durante descanso:** bloquea la sesión para evitar el ingreso de información.
+  - Usa `loginctl lock-session` si está disponible; si no, cae a `xdg-screensaver lock`.
+
+Dependencias opcionales (instalalas desde el gestor de paquetes de tu distribución): `brightnessctl`, `loginctl` (systemd-logind), `xdg-screensaver`.
+
+El nivel de brillo se guarda junto a los datos del proyecto (en Linux: `~/.local/share/com.DevPersonal.UltradianTimer/`), junto a `tracker_data.json`.
 
 ## Licencia
 
