@@ -169,19 +169,16 @@ pub fn restore_screen() {
     let save_path = brightness_save_path();
 
     if save_path.exists() {
-        if let Ok(level) = fs::read_to_string(&save_path) {
-            let level = level.trim();
-            if !level.is_empty()
-                && let Err(e) = Command::new("brightnessctl")
-                    .arg("s")
-                    .arg(level)
-                    .arg("-n")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-            {
-                tracing::warn!(error = %e, "failed to restore brightness via brightnessctl");
-            }
+        if let Some(level) = get_saved_brightness_from(&save_path)
+            && let Err(e) = Command::new("brightnessctl")
+                .arg("s")
+                .arg(level)
+                .arg("-n")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+        {
+            tracing::warn!(error = %e, "failed to restore brightness via brightnessctl");
         }
         let _ = fs::remove_file(&save_path);
         return;
@@ -253,18 +250,6 @@ pub fn unlock_screen() {
     }
 
     tracing::warn!("neither loginctl nor xdg-screensaver is available, screen unlocking skipped");
-}
-
-/// Get the saved brightness value from the data dir, if it exists.
-#[allow(dead_code)]
-pub fn get_saved_brightness() -> Option<String> {
-    get_saved_brightness_from(&brightness_save_path())
-}
-
-/// Persist a brightness level to the data dir so it can be restored later.
-#[allow(dead_code)]
-pub fn save_brightness(level: &str) {
-    let _ = save_brightness_to(&brightness_save_path(), level);
 }
 
 fn get_saved_brightness_from(path: &std::path::Path) -> Option<String> {
