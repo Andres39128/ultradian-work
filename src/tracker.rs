@@ -983,6 +983,10 @@ mod tests {
     use super::*;
     use crate::i18n::Language;
 
+    // Tests that mutate ULTRADIANT_DATA_PATH (a process-global env var) must
+    // run one at a time so parallel tests don't overwrite each other's data path.
+    static DATA_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_project_total_duration_empty() {
         let proj = Project {
@@ -1023,6 +1027,7 @@ mod tests {
 
     #[test]
     fn test_export_import_tasks() {
+        let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
         let export_path = temp_dir.join("test_export.xlsx");
         let data_path = temp_dir.join("test_tracker_data.json");
@@ -1066,6 +1071,7 @@ mod tests {
 
     #[test]
     fn test_import_priority_is_case_insensitive() {
+        let _guard = DATA_PATH_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir();
         let xlsx_path = temp_dir.join("test_import_priority.xlsx");
         let data_path = temp_dir.join("test_tracker_data_priority.json");
@@ -1176,63 +1182,76 @@ mod tests {
 
     #[test]
     fn test_create_task_validates_name() {
-        let mut data = TrackerData::default();
-        data.tasks.clear();
-        let mut new_task_error: Option<String> = None;
-        let mut new_task_name = String::new();
-
-        if new_task_name.trim().is_empty() {
-            new_task_error = Some("error".to_string());
+        let _guard = DATA_PATH_LOCK.lock().unwrap();
+        let data_path = std::env::temp_dir().join("test_tracker_data_create_task.json");
+        unsafe {
+            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
         }
-        assert!(new_task_error.is_some());
-        assert!(data.tasks.is_empty());
+        let _ = std::fs::remove_file(&data_path);
 
-        new_task_name = "Valid Task".into();
-        new_task_error = None;
-        if new_task_name.trim().is_empty() {
-            new_task_error = Some("error".to_string());
-        } else {
-            data.tasks.push(Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: new_task_name.clone(),
-                description: String::new(),
-                completed: false,
-                project: None,
-                priority: Priority::Media,
-                tags: String::new(),
-                deadline: String::new(),
-            });
-        }
-        assert!(new_task_error.is_none());
-        assert_eq!(data.tasks.len(), 1);
+        let mut state = TimeTrackerState::load();
+        assert!(state.data.tasks.is_empty());
+
+        // Empty name must be rejected by the real create_task().
+        state.new_task_name.clear();
+        state.create_task();
+        assert!(state.new_task_error.is_some());
+        assert!(state.data.tasks.is_empty());
+
+        // Valid name creates the task, clears the form, and persists it.
+        state.new_task_name = "Valid Task".into();
+        state.new_task_priority = Priority::Alta;
+        state.new_task_tags = "tag1".into();
+        state.create_task();
+        assert!(state.new_task_error.is_none());
+        assert_eq!(state.data.tasks.len(), 1);
+        assert_eq!(state.data.tasks[0].name, "Valid Task");
+        assert_eq!(state.data.tasks[0].priority, Priority::Alta);
+        assert_eq!(state.data.tasks[0].tags, "tag1");
+        assert!(state.new_task_name.is_empty());
+
+        // The real save() wrote the task to the injected data path.
+        let reloaded = TimeTrackerState::load();
+        assert_eq!(reloaded.data.tasks.len(), 1);
+        assert_eq!(reloaded.data.tasks[0].name, "Valid Task");
+
+        let _ = std::fs::remove_file(&data_path);
     }
 
     #[test]
     fn test_create_project_validates_name() {
-        let mut data = TrackerData::default();
-        data.projects.clear();
-        let mut new_project_error: Option<String> = None;
-        let mut new_project_name = String::new();
-
-        if new_project_name.trim().is_empty() {
-            new_project_error = Some("error".to_string());
+        let _guard = DATA_PATH_LOCK.lock().unwrap();
+        let data_path = std::env::temp_dir().join("test_tracker_data_create_project.json");
+        unsafe {
+            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
         }
-        assert!(new_project_error.is_some());
-        assert!(data.projects.is_empty());
+        let _ = std::fs::remove_file(&data_path);
 
-        new_project_name = "Valid Project".into();
-        new_project_error = None;
-        if new_project_name.trim().is_empty() {
-            new_project_error = Some("error".to_string());
-        } else {
-            data.projects.push(Project {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: new_project_name.clone(),
-                sessions: Vec::new(),
-            });
-        }
-        assert!(new_project_error.is_none());
-        assert_eq!(data.projects.len(), 1);
+        let mut state = TimeTrackerState::load();
+        assert!(state.data.projects.is_empty());
+
+        // Empty name must be rejected by the real add_project().
+        state.new_project_name.clear();
+        state.add_project();
+        assert!(state.new_project_error.is_some());
+        assert!(state.data.projects.is_empty());
+
+        // Valid name creates the project, activates it, clears the form, and persists it.
+        state.new_project_name = "Valid Project".into();
+        state.add_project();
+        assert!(state.new_project_error.is_none());
+        assert_eq!(state.data.projects.len(), 1);
+        assert_eq!(state.data.projects[0].name, "Valid Project");
+        let project_id = state.data.projects[0].id.clone();
+        assert_eq!(state.active_project_id, Some(project_id));
+        assert!(state.new_project_name.is_empty());
+
+        // The real save() wrote the project to the injected data path.
+        let reloaded = TimeTrackerState::load();
+        assert_eq!(reloaded.data.projects.len(), 1);
+        assert_eq!(reloaded.data.projects[0].name, "Valid Project");
+
+        let _ = std::fs::remove_file(&data_path);
     }
 
     #[test]
