@@ -7,6 +7,8 @@ use std::process::Command;
 mod i18n;
 mod models;
 mod screen;
+mod session_logic;
+mod task_logic;
 mod tracker;
 use tracker::TimeTrackerState;
 

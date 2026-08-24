@@ -6,18 +6,10 @@ use crate::screen::ScreenTools;
 
 pub use crate::models::*;
 
-/// Rebuilds in-memory state from a persisted in-progress session.
-/// If it was tracking, folds the time elapsed since the persisted start
-/// into the accumulated seconds, so the session keeps counting while the
-/// app is closed.
-fn restored_session_state(active: &ActiveSession, now_unix: u64) -> (bool, u64) {
-    if active.is_tracking && active.start_unix > 0 {
-        let gap = now_unix.saturating_sub(active.start_unix);
-        (true, active.elapsed_secs + gap)
-    } else {
-        (false, active.elapsed_secs)
-    }
-}
+/// Serializes tests that mutate `ULTRADIANT_DATA_PATH` (a process-global env
+/// var) so parallel tests don't overwrite each other's data path.
+#[cfg(test)]
+pub(crate) static DATA_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Default)]
 pub struct TimeTrackerState {
@@ -92,7 +84,7 @@ impl TimeTrackerState {
         });
         let (active_project_id, active_session_name, active_parent_session_id, is_tracking, current_session_start, current_session_elapsed) = match active {
             Some(a) => {
-                let (is_tracking, current_session_elapsed) = restored_session_state(a, chrono::Local::now().timestamp() as u64);
+                let (is_tracking, current_session_elapsed) = crate::session_logic::restored_session_state(a, chrono::Local::now().timestamp() as u64);
                 let current_session_start = if is_tracking { Some(Instant::now()) } else { None };
                 (
                     Some(a.project_id.clone()),
@@ -116,36 +108,6 @@ impl TimeTrackerState {
             current_session_elapsed,
             ..Default::default()
         }
-    }
-
-    /// Copies the in-memory session state into `data.active_session` so the
-    /// next `save()` (and any future `load()`) sees it.
-    fn sync_active_session(&mut self) {
-        let has_state = self.active_project_id.is_some()
-            || !self.active_session_name.is_empty()
-            || self.active_parent_session_id.is_some()
-            || self.is_tracking
-            || self.current_session_elapsed > 0;
-        self.data.active_session = if has_state {
-            Some(ActiveSession {
-                project_id: self.active_project_id.clone().unwrap_or_default(),
-                session_name: self.active_session_name.clone(),
-                parent_session_id: self.active_parent_session_id.clone(),
-                is_tracking: self.is_tracking,
-                start_unix: if self.is_tracking { chrono::Local::now().timestamp() as u64 } else { 0 },
-                elapsed_secs: self.current_session_elapsed,
-            })
-        } else {
-            None
-        };
-    }
-
-    fn session_display_secs(&self) -> u64 {
-        let mut secs = self.current_session_elapsed;
-        if let Some(start) = self.current_session_start {
-            secs += start.elapsed().as_secs();
-        }
-        secs
     }
 
     pub fn save(&mut self) {
@@ -172,111 +134,13 @@ impl TimeTrackerState {
         }
     }
 
-    fn add_project(&mut self) {
-        self.new_project_error = None;
-        if self.new_project_name.trim().is_empty() {
-            self.new_project_error = Some(crate::i18n::t(&self.data.language, "error_empty_name").to_string());
-            return;
-        }
-        let id = uuid::Uuid::new_v4().to_string();
-        self.data.projects.push(Project {
-            id: id.clone(),
-            name: self.new_project_name.clone(),
-            sessions: Vec::new(),
-        });
-        self.active_project_id = Some(id);
-        self.new_project_name.clear();
-        self.save();
-    }
-
+    /// Toggles tracking; minimizes the window when starting.
     pub fn toggle_tracking(&mut self, ctx: &egui::Context) {
         if self.is_tracking {
-            if let Some(start) = self.current_session_start {
-                self.current_session_elapsed += start.elapsed().as_secs();
-            }
-            self.current_session_start = None;
-            self.is_tracking = false;
-            self.save();
+            self.pause_session();
         } else {
-            self.current_session_start = Some(Instant::now());
-            self.is_tracking = true;
-            self.save();
+            self.start_session();
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-        }
-    }
-
-    fn finish_session(&mut self) {
-        let Some(proj_id) = &self.active_project_id else { return };
-        let Some(proj) = self.data.projects.iter_mut().find(|p| &p.id == proj_id) else { return };
-
-        if self.is_tracking
-            && let Some(start) = self.current_session_start {
-            self.current_session_elapsed += start.elapsed().as_secs();
-        }
-
-        let end = chrono::Local::now().timestamp() as u64;
-        let start = if self.current_session_elapsed > 0 {
-            end.saturating_sub(self.current_session_elapsed)
-        } else {
-            end
-        };
-
-        let name = if self.active_session_name.trim().is_empty() {
-            let lang = self.data.language;
-            format!("{} {}", crate::i18n::t(&lang, "session_label"), proj.sessions.len() + 1)
-        } else {
-            self.active_session_name.clone()
-        };
-
-        if let Some(parent_id) = &self.active_parent_session_id {
-            if let Some(parent_session) = proj.sessions.iter_mut().find(|s| &s.id == parent_id) {
-                parent_session.sub_sessions.push(SubSession {
-                    start_time: start,
-                    end_time: end,
-                });
-            }
-        } else {
-            proj.sessions.push(Session {
-                id: uuid::Uuid::new_v4().to_string(),
-                name,
-                start_time: start,
-                end_time: end,
-                sub_sessions: Vec::new(),
-            });
-        }
-
-        self.is_tracking = false;
-        self.current_session_start = None;
-        self.current_session_elapsed = 0;
-        self.active_session_name.clear();
-        self.active_parent_session_id = None;
-        self.save();
-    }
-
-    fn export_project_to_file(&mut self, proj: &Project, file_path: &std::path::Path) {
-        let lang = self.data.language;
-        let mut workbook = rust_xlsxwriter::Workbook::new();
-        let worksheet = workbook.add_worksheet();
-        {
-            let _ = worksheet.write_string(0, 0, crate::i18n::t(&lang, "session_history"));
-            let _ = worksheet.write_string(0, 1, crate::i18n::t(&lang, "total_duration"));
-            let _ = worksheet.write_string(0, 2, crate::i18n::t(&lang, "date_unix"));
-
-            for (row, session) in (1..).zip(proj.sessions.iter()) {
-                let total_secs = session.total_duration();
-
-                let _ = worksheet.write_string(row, 0, &session.name);
-                let _ = worksheet.write_number(row, 1, total_secs as f64 / 60.0);
-                let _ = worksheet.write_number(row, 2, session.start_time as f64);
-            }
-
-            if workbook.save(file_path).is_ok() {
-                self.export_message = Some(format!("{} {}", crate::i18n::t(&lang, "exported_to"), file_path.display()));
-                self.export_message_time = Some(Instant::now());
-            } else {
-                self.export_message = Some(crate::i18n::t(&lang, "error_export").to_string());
-                self.export_message_time = Some(Instant::now());
-            }
         }
     }
 
@@ -328,7 +192,7 @@ impl TimeTrackerState {
                         }
                     });
                 }
-                if let Some(proj_id) = &self.deleting_project_id {
+                if let Some(proj_id) = self.deleting_project_id.clone() {
                     let mut confirm_delete = false;
                     let mut cancel_delete = false;
                     egui::Window::new(crate::i18n::t(&lang, "delete_confirm_title"))
@@ -346,16 +210,7 @@ impl TimeTrackerState {
                             });
                         });
                     if confirm_delete {
-                        self.data.projects.retain(|p| p.id != *proj_id);
-                        if self.active_project_id.as_deref() == Some(proj_id) {
-                            self.active_project_id = None;
-                            self.active_session_name.clear();
-                            self.active_parent_session_id = None;
-                            self.current_session_start = None;
-                            self.current_session_elapsed = 0;
-                            self.is_tracking = false;
-                        }
-                        self.save();
+                        self.delete_project(&proj_id);
                     }
                     if confirm_delete || cancel_delete {
                         self.deleting_project_id = None;
@@ -432,7 +287,6 @@ impl TimeTrackerState {
                         });
                     });
 
-                    let mut session_to_delete = None;
                     let mut session_to_save = None;
                     let mut continue_session = None;
 
@@ -500,21 +354,15 @@ impl TimeTrackerState {
                         }
                     });
 
-                    if let Some((sid, new_name)) = session_to_save
-                        && let Some(proj) = self.data.projects.iter_mut().find(|p| p.id == proj_id)
-                        && let Some(sess) = proj.sessions.iter_mut().find(|s| s.id == sid) {
-                        sess.name = new_name;
-                        self.save();
+                    if let Some((sid, new_name)) = session_to_save {
+                        self.rename_session(&proj_id, &sid, new_name);
                     }
 
-                    if let Some((_pid, sid, sname)) = continue_session
-                        && !self.is_tracking {
-                        self.active_parent_session_id = Some(sid);
-                        self.active_session_name = sname;
-                        self.save();
+                    if let Some((_pid, sid, sname)) = continue_session {
+                        self.continue_session(sid, sname);
                     }
 
-                    if let Some((del_pid, del_sid)) = &self.deleting_session_id {
+                    if let Some((del_pid, del_sid)) = self.deleting_session_id.clone() {
                         let mut confirm_delete = false;
                         let mut cancel_delete = false;
 
@@ -534,24 +382,11 @@ impl TimeTrackerState {
                             });
 
                         if confirm_delete {
-                            let deleted_sid = del_sid.clone();
-                            if let Some(proj) = self.data.projects.iter_mut().find(|p| p.id == *del_pid) {
-                                proj.sessions.retain(|s| s.id != *del_sid);
-                            }
-                            if self.active_parent_session_id.as_deref() == Some(del_sid) {
-                                self.active_parent_session_id = None;
-                                self.active_session_name.clear();
-                            }
-                            self.save();
-                            session_to_delete = Some(deleted_sid);
+                            self.delete_session(&del_pid, &del_sid);
                         }
                         if confirm_delete || cancel_delete {
-                            session_to_delete = Some("handled".to_string());
+                            self.deleting_session_id = None;
                         }
-                    }
-
-                    if session_to_delete.is_some() {
-                        self.deleting_session_id = None;
                     }
                 } else {
                     ui.label(crate::i18n::t(&lang, "empty_state_tracker"));
@@ -699,176 +534,30 @@ impl TimeTrackerState {
                     });
                 });
 
-                if new_completed != task_completed
-                    && let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == task_id_clone) {
-                    t.completed = new_completed;
+                if new_completed != task_completed {
+                    self.set_task_completed(task_id, new_completed);
                 }
                 if clicked_delete {
                     to_delete = Some(task_id_clone);
                 }
-                if clicked_work && !self.is_tracking
-                    && let Some(proj_id) = task_proj_clone {
+                if clicked_work && let Some(proj_id) = task_proj_clone {
                     start_task_session = Some((proj_id, task_name_clone));
                 }
             }
         });
 
         if let Some(id) = to_delete {
-            self.data.tasks.retain(|t| t.id != id);
-            self.save();
+            self.delete_task(&id);
         } else if save_needed {
             self.save();
         }
 
-        if let Some((proj_id, task_name)) = start_task_session {
-            self.active_project_id = Some(proj_id);
-            self.active_session_name = format!("{} {}", crate::i18n::t(&lang, "task_session_prefix"), task_name);
-            self.active_parent_session_id = None;
-            self.current_session_start = Some(Instant::now());
-            self.is_tracking = true;
-            self.save();
+        if let Some((proj_id, task_name)) = start_task_session
+            && self.start_task_session(proj_id, task_name) {
             redirect_to_tracker = true;
         }
 
         redirect_to_tracker
-    }
-
-    fn create_task(&mut self) {
-        self.new_task_error = None;
-        if self.new_task_name.trim().is_empty() {
-            self.new_task_error = Some(crate::i18n::t(&self.data.language, "error_empty_name").to_string());
-            return;
-        }
-        self.data.tasks.push(Task {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: self.new_task_name.clone(),
-            description: self.new_task_description.clone(),
-            completed: false,
-            project: if self.new_task_project_input.is_empty() { None } else { Some(self.new_task_project_input.clone()) },
-            priority: self.new_task_priority.clone(),
-            tags: self.new_task_tags.clone(),
-            deadline: self.new_task_deadline.clone(),
-        });
-        self.new_task_name.clear();
-        self.new_task_description.clear();
-        self.new_task_tags.clear();
-        self.new_task_deadline.clear();
-        self.save();
-    }
-
-    fn import_tasks_from_file(&mut self, path: &std::path::Path) {
-        use calamine::{Reader, open_workbook_auto};
-        let lang = self.data.language;
-        let Ok(mut workbook) = open_workbook_auto(path) else { 
-            self.export_message = Some(crate::i18n::t(&lang, "error_open_file").to_string());
-            self.export_message_time = Some(Instant::now());
-            return;
-        };
-        let Ok(range) = workbook.worksheet_range("Pendientes") else { 
-            self.export_message = Some(crate::i18n::t(&lang, "sheet_not_found").to_string());
-            self.export_message_time = Some(Instant::now());
-            return;
-        };
-
-        let mut imported = 0;
-        for (i, row) in range.rows().enumerate() {
-            if i == 0 { continue; }
-            if row.is_empty() || row.iter().all(|c| c.to_string().trim().is_empty()) { continue; }
-
-            let name = row.first().map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-            if name.is_empty() { continue; }
-
-            let description = row.get(1).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-
-            let proj_name = row.get(2).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-            let project = if proj_name.is_empty() {
-                None
-            } else {
-                if let Some(p) = self.data.projects.iter().find(|p| p.name.trim().to_lowercase() == proj_name.to_lowercase()) {
-                    Some(p.id.clone())
-                } else {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    self.data.projects.push(Project {
-                        id: id.clone(),
-                        name: proj_name.clone(),
-                        sessions: Vec::new()
-                    });
-                    Some(id)
-                }
-            };
-
-            if self.data.tasks.iter().any(|t| t.name.trim().to_lowercase() == name.to_lowercase() && t.project == project) {
-                continue;
-            }
-
-            let completed_str = row.get(3).map(|c| c.to_string().trim().to_lowercase()).unwrap_or_default();
-            let completed = matches!(completed_str.as_str(), "true" | "si" | "1" | "yes");
-            let priority_str = row.get(4).map(|c| c.to_string().trim().to_lowercase()).unwrap_or_default();
-            let priority = match priority_str.as_str() {
-                "alta" | "high" => Priority::Alta,
-                "media" | "medium" => Priority::Media,
-                "baja" | "low" => Priority::Baja,
-                _ => Priority::Media,
-            };
-            let tags = row.get(5).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-            let deadline = row.get(6).map(|c| c.to_string().trim().to_string()).unwrap_or_default();
-
-            self.data.tasks.push(Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                name,
-                description,
-                project,
-                completed,
-                priority,
-                tags,
-                deadline,
-            });
-            imported += 1;
-        }
-        self.save();
-        self.export_message = Some(format!("{} {}", imported, crate::i18n::t(&lang, "imported_tasks")));
-        self.export_message_time = Some(Instant::now());
-    }
-
-    fn export_tasks_to_file(&mut self, path: &std::path::Path) {
-        let lang = self.data.language;
-        let mut workbook = rust_xlsxwriter::Workbook::new();
-        if let Ok(worksheet) = workbook.add_worksheet().set_name("Pendientes") {
-            let _ = worksheet.write_string(0, 0, crate::i18n::t(&lang, "excel_header_name"));
-            let _ = worksheet.write_string(0, 1, crate::i18n::t(&lang, "excel_header_description"));
-            let _ = worksheet.write_string(0, 2, crate::i18n::t(&lang, "excel_header_project"));
-            let _ = worksheet.write_string(0, 3, crate::i18n::t(&lang, "excel_header_completed"));
-            let _ = worksheet.write_string(0, 4, crate::i18n::t(&lang, "excel_header_priority"));
-            let _ = worksheet.write_string(0, 5, crate::i18n::t(&lang, "excel_header_tags"));
-            let _ = worksheet.write_string(0, 6, crate::i18n::t(&lang, "excel_header_deadline"));
-
-            for (i, task) in self.data.tasks.iter().enumerate() {
-                let row = (i + 1) as u32;
-                let _ = worksheet.write_string(row, 0, &task.name);
-                let _ = worksheet.write_string(row, 1, &task.description);
-
-                let proj_name = if let Some(pid) = &task.project {
-                    self.data.projects.iter().find(|p| p.id == *pid).map(|p| p.name.clone()).unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                let _ = worksheet.write_string(row, 2, &proj_name);
-
-                let _ = worksheet.write_string(row, 3, if task.completed { "true" } else { "false" });
-                let prio_str = match task.priority { Priority::Alta => "Alta", Priority::Media => "Media", Priority::Baja => "Baja" };
-                let _ = worksheet.write_string(row, 4, prio_str);
-                let _ = worksheet.write_string(row, 5, &task.tags);
-                let _ = worksheet.write_string(row, 6, &task.deadline);
-            }
-
-            if workbook.save(path).is_ok() {
-                self.export_message = Some(format!("{} {}", crate::i18n::t(&lang, "exported_to"), path.display()));
-                self.export_message_time = Some(Instant::now());
-            } else {
-                self.export_message = Some(crate::i18n::t(&lang, "error_export").to_string());
-                self.export_message_time = Some(Instant::now());
-            }
-        }
     }
 
     pub fn ui_dashboard(&self, _ctx: &egui::Context, ui: &mut egui::Ui, projects: &[Project]) {
@@ -983,10 +672,6 @@ mod tests {
     use super::*;
     use crate::i18n::Language;
 
-    // Tests that mutate ULTRADIANT_DATA_PATH (a process-global env var) must
-    // run one at a time so parallel tests don't overwrite each other's data path.
-    static DATA_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn test_project_total_duration_empty() {
         let proj = Project {
@@ -1023,90 +708,6 @@ mod tests {
             ],
         };
         assert_eq!(proj.total_duration(), 150);
-    }
-
-    #[test]
-    fn test_export_import_tasks() {
-        let _guard = DATA_PATH_LOCK.lock().unwrap();
-        let temp_dir = std::env::temp_dir();
-        let export_path = temp_dir.join("test_export.xlsx");
-        let data_path = temp_dir.join("test_tracker_data.json");
-
-        unsafe {
-            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
-        }
-        let _ = std::fs::remove_file(&export_path);
-        let _ = std::fs::remove_file(&data_path);
-
-        let mut state = TimeTrackerState::load();
-        state.data.tasks.clear();
-
-        state.data.tasks.push(Task {
-            id: "test-id-1".into(),
-            name: "Test Task".into(),
-            description: "Description".into(),
-            project: None,
-            completed: false,
-            priority: Priority::Alta,
-            tags: "tag1".into(),
-            deadline: "2023-12-31".into(),
-        });
-
-        state.export_tasks_to_file(&export_path);
-        assert!(export_path.exists());
-
-        let mut new_state = TimeTrackerState::load();
-        new_state.data.tasks.clear();
-
-        new_state.import_tasks_from_file(&export_path);
-
-        assert_eq!(new_state.data.tasks.len(), 1);
-        let imported = &new_state.data.tasks[0];
-        assert_eq!(imported.name, "Test Task");
-        assert_eq!(imported.description, "Description");
-        assert_eq!(imported.completed, false);
-
-        let _ = std::fs::remove_file(&export_path);
-    }
-
-    #[test]
-    fn test_import_priority_is_case_insensitive() {
-        let _guard = DATA_PATH_LOCK.lock().unwrap();
-        let temp_dir = std::env::temp_dir();
-        let xlsx_path = temp_dir.join("test_import_priority.xlsx");
-        let data_path = temp_dir.join("test_tracker_data_priority.json");
-        unsafe {
-            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
-        }
-        let _ = std::fs::remove_file(&xlsx_path);
-        let _ = std::fs::remove_file(&data_path);
-
-        let mut workbook = rust_xlsxwriter::Workbook::new();
-        let worksheet = workbook.add_worksheet().set_name("Pendientes").expect("create Pendientes worksheet");
-        for (i, header) in ["Nombre", "Descripcion", "Proyecto", "Completado", "Prioridad", "Tags", "Fecha limite"].into_iter().enumerate() {
-            let _ = worksheet.write_string(0, i as u16, header);
-        }
-        for (r, (name, priority)) in [("T Alta", "High"), ("T Media", "medium"), ("T Baja", "Baja"), ("T Typo", "Urgente")].into_iter().enumerate() {
-            let row = (r + 1) as u32;
-            let _ = worksheet.write_string(row, 0, name);
-            let _ = worksheet.write_string(row, 3, "false");
-            let _ = worksheet.write_string(row, 4, priority);
-        }
-        assert!(workbook.save(&xlsx_path).is_ok());
-
-        let mut state = TimeTrackerState::load();
-        state.data.tasks.clear();
-        state.import_tasks_from_file(&xlsx_path);
-
-        assert_eq!(state.data.tasks.len(), 4);
-        let priority_of = |name: &str| state.data.tasks.iter().find(|t| t.name == name).unwrap().priority.clone();
-        assert_eq!(priority_of("T Alta"), Priority::Alta);
-        assert_eq!(priority_of("T Media"), Priority::Media);
-        assert_eq!(priority_of("T Baja"), Priority::Baja);
-        assert_eq!(priority_of("T Typo"), Priority::Media);
-
-        let _ = std::fs::remove_file(&xlsx_path);
-        let _ = std::fs::remove_file(&data_path);
     }
 
     #[test]
@@ -1181,80 +782,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_task_validates_name() {
-        let _guard = DATA_PATH_LOCK.lock().unwrap();
-        let data_path = std::env::temp_dir().join("test_tracker_data_create_task.json");
-        unsafe {
-            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
-        }
-        let _ = std::fs::remove_file(&data_path);
-
-        let mut state = TimeTrackerState::load();
-        assert!(state.data.tasks.is_empty());
-
-        // Empty name must be rejected by the real create_task().
-        state.new_task_name.clear();
-        state.create_task();
-        assert!(state.new_task_error.is_some());
-        assert!(state.data.tasks.is_empty());
-
-        // Valid name creates the task, clears the form, and persists it.
-        state.new_task_name = "Valid Task".into();
-        state.new_task_priority = Priority::Alta;
-        state.new_task_tags = "tag1".into();
-        state.create_task();
-        assert!(state.new_task_error.is_none());
-        assert_eq!(state.data.tasks.len(), 1);
-        assert_eq!(state.data.tasks[0].name, "Valid Task");
-        assert_eq!(state.data.tasks[0].priority, Priority::Alta);
-        assert_eq!(state.data.tasks[0].tags, "tag1");
-        assert!(state.new_task_name.is_empty());
-
-        // The real save() wrote the task to the injected data path.
-        let reloaded = TimeTrackerState::load();
-        assert_eq!(reloaded.data.tasks.len(), 1);
-        assert_eq!(reloaded.data.tasks[0].name, "Valid Task");
-
-        let _ = std::fs::remove_file(&data_path);
-    }
-
-    #[test]
-    fn test_create_project_validates_name() {
-        let _guard = DATA_PATH_LOCK.lock().unwrap();
-        let data_path = std::env::temp_dir().join("test_tracker_data_create_project.json");
-        unsafe {
-            std::env::set_var("ULTRADIANT_DATA_PATH", &data_path);
-        }
-        let _ = std::fs::remove_file(&data_path);
-
-        let mut state = TimeTrackerState::load();
-        assert!(state.data.projects.is_empty());
-
-        // Empty name must be rejected by the real add_project().
-        state.new_project_name.clear();
-        state.add_project();
-        assert!(state.new_project_error.is_some());
-        assert!(state.data.projects.is_empty());
-
-        // Valid name creates the project, activates it, clears the form, and persists it.
-        state.new_project_name = "Valid Project".into();
-        state.add_project();
-        assert!(state.new_project_error.is_none());
-        assert_eq!(state.data.projects.len(), 1);
-        assert_eq!(state.data.projects[0].name, "Valid Project");
-        let project_id = state.data.projects[0].id.clone();
-        assert_eq!(state.active_project_id, Some(project_id));
-        assert!(state.new_project_name.is_empty());
-
-        // The real save() wrote the project to the injected data path.
-        let reloaded = TimeTrackerState::load();
-        assert_eq!(reloaded.data.projects.len(), 1);
-        assert_eq!(reloaded.data.projects[0].name, "Valid Project");
-
-        let _ = std::fs::remove_file(&data_path);
-    }
-
-    #[test]
     fn test_screen_settings_backward_compatibility() {
         // Old JSON without screen fields must deserialize using serde(default) = false.
         let json = r#"{"language": "Es", "work_duration_mins": 90, "rest_duration_mins": 15}"#;
@@ -1287,66 +814,6 @@ mod tests {
         assert_eq!(loaded.schema_version, 1);
 
         let _ = std::fs::remove_file(&target);
-    }
-
-    #[test]
-    fn test_sync_active_session_populates_data() {
-        let mut state = TimeTrackerState {
-            active_project_id: Some("p1".into()),
-            active_session_name: "Sesión".into(),
-            active_parent_session_id: Some("s1".into()),
-            is_tracking: true,
-            current_session_elapsed: 120,
-            ..Default::default()
-        };
-
-        state.sync_active_session();
-
-        let active = state.data.active_session.as_ref().expect("active_session should be persisted");
-        assert_eq!(active.project_id, "p1");
-        assert_eq!(active.session_name, "Sesión");
-        assert_eq!(active.parent_session_id.as_deref(), Some("s1"));
-        assert!(active.is_tracking);
-        assert_eq!(active.elapsed_secs, 120);
-        assert!(active.start_unix > 0);
-    }
-
-    #[test]
-    fn test_sync_active_session_none_when_empty() {
-        let mut state = TimeTrackerState::default();
-        state.sync_active_session();
-        assert_eq!(state.data.active_session, None);
-    }
-
-    #[test]
-    fn test_restored_session_state_tracking_folds_gap() {
-        let active = ActiveSession {
-            project_id: "p1".into(),
-            session_name: "S".into(),
-            parent_session_id: None,
-            is_tracking: true,
-            start_unix: 1_000,
-            elapsed_secs: 50,
-        };
-        // 300s passed since start -> 50 + 300 accumulated, still tracking.
-        let (is_tracking, elapsed) = restored_session_state(&active, 1_300);
-        assert!(is_tracking);
-        assert_eq!(elapsed, 350);
-    }
-
-    #[test]
-    fn test_restored_session_state_paused_keeps_accumulated() {
-        let active = ActiveSession {
-            project_id: "p1".into(),
-            session_name: "S".into(),
-            parent_session_id: None,
-            is_tracking: false,
-            start_unix: 0,
-            elapsed_secs: 42,
-        };
-        let (is_tracking, elapsed) = restored_session_state(&active, 9_999_999);
-        assert!(!is_tracking);
-        assert_eq!(elapsed, 42);
     }
 
     #[test]
